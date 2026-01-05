@@ -36,8 +36,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (result['success']) {
-      // 로그인 성공 후 FCM 토큰 서버 전송
-      await FCMService().getTokenAndSendToServer();
+      // 로그인 성공 후 FCM 토큰 서버 전송 (에러 발생해도 계속 진행)
+      try {
+        await FCMService().getTokenAndSendToServer();
+      } catch (e) {
+        print('[로그인] FCM 토큰 전송 실패 (무시하고 계속): $e');
+      }
       
       Navigator.pushReplacement(
         context,
