@@ -1,0 +1,659 @@
+﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import '../services/api_service.dart';
+
+class DashboardScreen extends StatefulWidget {
+  final String username;
+  final ApiService apiService;
+
+  const DashboardScreen({
+    Key? key,
+    required this.username,
+    required this.apiService,
+  }) : super(key: key);
+
+  @override
+  _DashboardScreenState createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
+  Timer? _timer;
+  List<Map<String, dynamic>> _accounts = [];
+  bool _isLoading = true;
+  late TabController _tabController;
+  String _selectedAccount = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedAccount = widget.username;
+    _tabController = TabController(length: 3, vsync: this);
+    _loadStatus();
+    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _loadStatus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadStatus() async {
+    final result = await widget.apiService.getDashboardStatus();
+    if (result['success']) {
+      setState(() {
+        _accounts = List<Map<String, dynamic>>.from(result['accounts'] ?? []);
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _startMacro(String username, String mode, bool clubDonation, Map<String, dynamic>? parkingConditions) async {
+    final result = await widget.apiService.startMacro(
+      username, 
+      mode,
+      clubDonation: clubDonation,
+      parkingConditions: parkingConditions,
+    );
+    
+    if (result['success']) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: Colors.green),
+      );
+      await _loadStatus();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오류: ${result['message']}'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _stopMacro(String username) async {
+    final result = await widget.apiService.stopMacro(username);
+    if (result['success']) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$username: 매크로 중지 명령 전송됨'), backgroundColor: Colors.orange),
+      );
+      await _loadStatus();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오류: ${result['message']}'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const Icon(Icons.sports_soccer, size: 24),
+            const SizedBox(width: 8),
+            const Text('FC Online 4 매크로'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF1a237e),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadStatus,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              widget.apiService.logout();
+              Navigator.of(context).pushReplacementNamed('/');
+            },
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.dashboard), text: '상태'),
+            Tab(icon: Icon(Icons.bar_chart), text: '통계'),
+            Tab(icon: Icon(Icons.list), text: '전적'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildStatusTab(),
+          _buildStatisticsTab(),
+          _buildMatchHistoryTab(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusTab() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_accounts.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text('연동된 계정이 없습니다.', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadStatus,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: _accounts.length,
+        itemBuilder: (context, index) {
+          final account = _accounts[index];
+          return _buildAccountCard(account);
+        },
+      ),
+    );
+  }
+
+  Widget _buildAccountCard(Map<String, dynamic> account) {
+    final username = account['username'] ?? '';
+    final isPrimary = account['is_primary'] ?? false;
+    final status = account['status'] ?? 'offline';
+    final mode = account['mode'] ?? '';
+    final tier = account['tier'] ?? '-';
+    final score = account['score']?.toString() ?? '-';
+    final rank = account['rank']?.toString() ?? '-';
+    final record = account['record'] ?? '0-0-0';
+    final fcTotal = account['fc_total']?.toString() ?? '0';
+    final highestScore = account['highest_score']?.toString() ?? '0';
+    final highestScoreTime = account['highest_score_time'] ?? '';
+    final timeAgo = account['time_ago'] ?? '알 수 없음';
+
+    final isOnline = status == 'online';
+    final isRunning = isOnline && mode.isNotEmpty && mode != 'stopped' && mode != '정지';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.person, color: Colors.blue[700], size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      username,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    if (isPrimary) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          '주 계정',
+                          style: TextStyle(color: Colors.white, fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isOnline ? Colors.green : Colors.grey,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.circle, size: 10, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Text(
+                        isOnline ? '온라인' : '오프라인',
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              childAspectRatio: 3,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              children: [
+                _buildInfoItem(Icons.gamepad, '모드', mode.isEmpty ? '-' : mode),
+                _buildInfoItem(Icons.emoji_events, '티어', tier),
+                _buildInfoItem(Icons.star, '점수', _formatNumber(score)),
+                _buildInfoItem(Icons.leaderboard, '순위', _formatNumber(rank)),
+                _buildInfoItem(Icons.poll, '전적', record),
+                _buildInfoItem(Icons.monetization_on, 'FC', '$fcTotal FC'),
+                _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore)),
+              ],
+            ),
+            if (highestScoreTime.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                '  최고점수 달성: $highestScoreTime',
+                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+              ),
+            ],
+            const Divider(height: 24),
+            _buildControlSection(username, isOnline, isRunning, mode),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.access_time, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 4),
+                Text(
+                  '마지막 활동: $timeAgo',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.blue[700]),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+              ),
+              Text(
+                value,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildControlSection(String username, bool isOnline, bool isRunning, String currentMode) {
+    String selectedMode = 'coach';
+    bool clubDonation = false;
+    bool showParkingConditions = false;
+    
+    // 주차모드 조건 상태
+    bool tierEnabled = false;
+    String selectedTier = '슈퍼챔피언스감독';
+    bool rankEnabled = false;
+    int? rankValue;
+    String rankCondition = '이하';
+    bool scoreEnabled = false;
+    int? scoreValue;
+    String scoreCondition = '이상';
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isRunning) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _stopMacro(username),
+                  icon: const Icon(Icons.stop),
+                  label: const Text('중지'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (!isRunning && isOnline) ...[
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      value: selectedMode,
+                      decoration: const InputDecoration(
+                        labelText: '모드',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'coach', child: Text(' 감독모드')),
+                        DropdownMenuItem(value: 'league', child: Text(' 리그모드')),
+                        DropdownMenuItem(value: 'parking', child: Text(' 주차모드')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          selectedMode = value!;
+                          showParkingConditions = (value == 'parking');
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Map<String, dynamic>? parkingConditions;
+                        
+                        if (selectedMode == 'parking') {
+                          parkingConditions = {};
+                          if (tierEnabled) {
+                            parkingConditions['tier'] = selectedTier;
+                          }
+                          if (rankEnabled && rankValue != null) {
+                            parkingConditions['rank'] = {
+                              'value': rankValue,
+                              'condition': rankCondition,
+                            };
+                          }
+                          if (scoreEnabled && scoreValue != null) {
+                            parkingConditions['score'] = {
+                              'value': scoreValue,
+                              'condition': scoreCondition,
+                            };
+                          }
+                          
+                          if (parkingConditions.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('주차모드 조건을 최소 1개 이상 선택해주세요.'),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                            return;
+                          }
+                        }
+                        
+                        _startMacro(username, selectedMode, clubDonation, parkingConditions);
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('시작'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1a237e),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              
+              // 주차모드 조건 입력
+              if (showParkingConditions) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        ' 주차모드 조건',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      // 티어 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: tierEnabled,
+                            onChanged: (value) {
+                              setState(() {
+                                tierEnabled = value!;
+                              });
+                            },
+                          ),
+                          const Text('티어:', style: TextStyle(fontSize: 13)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedTier,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              style: const TextStyle(fontSize: 12),
+                              items: const [
+                                DropdownMenuItem(value: '슈퍼챔피언스감독', child: Text('슈퍼챔피언스감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챔피언스감독', child: Text('챔피언스감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '슈퍼챌린저감독', child: Text('슈퍼챌린저감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저1부감독', child: Text('챌린저1부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저2부감독', child: Text('챌린저2부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저3부감독', child: Text('챌린저3부감독', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: tierEnabled ? (value) {
+                                setState(() {
+                                  selectedTier = value!;
+                                });
+                              } : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      
+                      // 순위 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: rankEnabled,
+                            onChanged: (value) {
+                              setState(() {
+                                rankEnabled = value!;
+                              });
+                            },
+                          ),
+                          const Text('순위:', style: TextStyle(fontSize: 13)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                hintText: '순위',
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              style: const TextStyle(fontSize: 12),
+                              keyboardType: TextInputType.number,
+                              enabled: rankEnabled,
+                              onChanged: (value) {
+                                rankValue = int.tryParse(value);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          DropdownButton<String>(
+                            value: rankCondition,
+                            items: const [
+                              DropdownMenuItem(value: '이하', child: Text('이하', style: TextStyle(fontSize: 12))),
+                              DropdownMenuItem(value: '이상', child: Text('이상', style: TextStyle(fontSize: 12))),
+                            ],
+                            onChanged: rankEnabled ? (value) {
+                              setState(() {
+                                rankCondition = value!;
+                              });
+                            } : null,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      
+                      // 점수 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: scoreEnabled,
+                            onChanged: (value) {
+                              setState(() {
+                                scoreEnabled = value!;
+                              });
+                            },
+                          ),
+                          const Text('점수:', style: TextStyle(fontSize: 13)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                hintText: '점수',
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              style: const TextStyle(fontSize: 12),
+                              keyboardType: TextInputType.number,
+                              enabled: scoreEnabled,
+                              onChanged: (value) {
+                                scoreValue = int.tryParse(value);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          DropdownButton<String>(
+                            value: scoreCondition,
+                            items: const [
+                              DropdownMenuItem(value: '이상', child: Text('이상', style: TextStyle(fontSize: 12))),
+                              DropdownMenuItem(value: '이하', child: Text('이하', style: TextStyle(fontSize: 12))),
+                            ],
+                            onChanged: scoreEnabled ? (value) {
+                              setState(() {
+                                scoreCondition = value!;
+                              });
+                            } : null,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              
+              CheckboxListTile(
+                value: clubDonation,
+                onChanged: (value) {
+                  setState(() {
+                    clubDonation = value!;
+                  });
+                },
+                title: const Text(' 클럽 기부 (5경기마다)', style: TextStyle(fontSize: 14)),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
+            ],
+            if (!isOnline) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 20, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Text('오프라인 상태에서는 제어할 수 없습니다.', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildStatisticsTab() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.construction, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            '통계 기능 구현 중...',
+            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '다음 업데이트에서 제공될 예정입니다.',
+            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMatchHistoryTab() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.construction, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            '전적 조회 기능 구현 중...',
+            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '다음 업데이트에서 제공될 예정입니다.',
+            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatNumber(String num) {
+    if (num == '-' || num.isEmpty) return '-';
+    try {
+      final number = int.parse(num);
+      return number.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]},',
+      );
+    } catch (e) {
+      return num;
+    }
+  }
+}

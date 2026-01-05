@@ -1,0 +1,136 @@
+// API 호출 함수들
+  Future<void> _loadFCStatistics() async {
+    if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
+    
+    setState(() {
+      _statisticsLoading = true;
+    });
+
+    try {
+      String? startDate;
+      String? endDate;
+      
+      if (_fcPeriod == 'custom') {
+        if (_fcStartDate != null && _fcEndDate != null) {
+          startDate = '${_fcStartDate!.year}-${_fcStartDate!.month.toString().padLeft(2, "0")}-${_fcStartDate!.day.toString().padLeft(2, "0")}';
+          endDate = '${_fcEndDate!.year}-${_fcEndDate!.month.toString().padLeft(2, "0")}-${_fcEndDate!.day.toString().padLeft(2, "0")}';
+        }
+      }
+
+      final data = await _apiService.getFCMining(
+        _selectedAccount!,
+        _fcPeriod == 'custom' ? 'custom' : _fcPeriod,
+        startDate: startDate,
+        endDate: endDate,
+      );
+
+      setState(() {
+        _fcMiningData = data;
+        _statisticsLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _statisticsLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('FC 채굴량 로드 실패: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadRankScoreStatistics() async {
+    if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
+    
+    setState(() {
+      _statisticsLoading = true;
+    });
+
+    try {
+      String? startDate;
+      String? endDate;
+      
+      if (_rankPeriod == 'custom') {
+        if (_rankStartDate != null && _rankEndDate != null) {
+          startDate = '${_rankStartDate!.year}-${_rankStartDate!.month.toString().padLeft(2, "0")}-${_rankStartDate!.day.toString().padLeft(2, "0")}';
+          endDate = '${_rankEndDate!.year}-${_rankEndDate!.month.toString().padLeft(2, "0")}-${_rankEndDate!.day.toString().padLeft(2, "0")}';
+        }
+      }
+
+      final data = await _apiService.getRankScore(
+        _selectedAccount!,
+        _rankPeriod == 'custom' ? 'custom' : _rankPeriod,
+        startDate: startDate,
+        endDate: endDate,
+      );
+
+      setState(() {
+        _rankScoreData = data;
+        _statisticsLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _statisticsLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('순위/점수 로드 실패: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadMatchCountStatistics() async {
+    if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
+    
+    setState(() {
+      _statisticsLoading = true;
+    });
+
+    try {
+      String? startDate;
+      String? endDate;
+      
+      if (_matchPeriod == 'custom') {
+        if (_matchStartDate != null && _matchEndDate != null) {
+          startDate = '${_matchStartDate!.year}-${_matchStartDate!.month.toString().padLeft(2, "0")}-${_matchStartDate!.day.toString().padLeft(2, "0")}';
+          endDate = '${_matchEndDate!.year}-${_matchEndDate!.month.toString().padLeft(2, "0")}-${_matchEndDate!.day.toString().padLeft(2, "0")}';
+        }
+      }
+
+      final data = await _apiService.getMatchCount(
+        _selectedAccount!,
+        _matchPeriod == 'custom' ? 'custom' : _matchPeriod,
+        'all',
+        startDate: startDate,
+        endDate: endDate,
+      );
+
+      setState(() {
+        _matchCountData = data;
+        _statisticsLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _statisticsLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('경기수 로드 실패: $e')),
+        );
+      }
+    }
+  }
+
+  Widget _buildPeriodButton(String label, String value, String currentValue, Function(String) onPressed) {
+    final isActive = currentValue == value;
+    return OutlinedButton(
+      onPressed: () => onPressed(value),
+      style: OutlinedButton.styleFrom(
+        backgroundColor: isActive ? Theme.of(context).primaryColor : null,
+        foregroundColor: isActive ? Colors.white : Theme.of(context).primaryColor,
+      ),
+      child: Text(label),
+    );
+  }

@@ -1,0 +1,526 @@
+from irispy2 import Bot, ChatContext
+import requests
+from bs4 import BeautifulSoup
+import re
+import logging
+from collections import Counter
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+from matplotlib import font_manager
+import numpy as np
+import os
+from datetime import datetime
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("FIFA_RANKINGS")
+
+# Bot 인스턴스 생성
+bot = Bot(iris_url="http://192.168.50.13:3000")
+
+# 모듈 최상단에 추가
+ALLSEE = "\u200b" * 500
+
+def get_rank_data(url, rank_start, rank_end):
+    """
+    랭킹 데이터를 가져와 특정 순위 범위의 데이터를 반환
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"API 요청 실패: {response.status_code}")
+            return {"success": False}
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        rank_rows = soup.select(".tbody .tr")
+        rankings = []
+        
+        for row in rank_rows:
+            rank_text = row.select_one(".rank_no").text
+            try:
+                rank = int(rank_text)
+                if rank_start <= rank <= rank_end:
+                    score = row.select_one(".rank_r_win_point").text
+                    rankings.append(f"{rank}\t{score}")
+            except ValueError:
+                # 숫자가 아닌 경우(예: 헤더) 건너뜀
+                continue
+                
+        rank_advice = soup.select_one(".rank_advice").text if soup.select_one(".rank_advice") else ""
+        date_match = re.search(r"※ (\d{4}-\d{2}-\d{2} \d{2}):\d{2}:\d{2}", rank_advice)
+        date_info = f"{date_match.group(1)}시" if date_match else "날짜 정보 없음"
+        
+        return {"success": True, "rankings": rankings, "date_info": date_info}
+    except Exception as e:
+        logger.error(f"데이터 조회 중 오류 발생: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def get_rank_score(url, target_rank):
+    """
+    특정 URL에서 특정 순위의 점수만 가져옴
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"API 요청 실패: {response.status_code}")
+            return {"success": False}
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        rank_rows = soup.select(".tbody .tr")
+        
+        for row in rank_rows:
+            rank_text = row.select_one(".rank_no").text
+            try:
+                rank = int(rank_text)
+                if rank == target_rank:
+                    score = row.select_one(".rank_r_win_point").text
+                    return {"success": True, "score": score}
+            except ValueError:
+                # 숫자가 아닌 경우 건너뜀
+                continue
+                
+        return {"success": False, "error": "해당 순위를 찾을 수 없습니다"}
+    except Exception as e:
+        logger.error(f"점수 조회 중 오류 발생: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def find_stat(chat):
+    """
+    슈챔컷 또는 주차컷 명령어 처리
+    """
+    content = chat.message.msg
+    
+    if content == "!슈챔컷" or content == "!주차컷":
+        target_url = "https://fconline.nexon.com/datacenter/rank_inner?rt=manager"
+        if content == "!주차컷":
+            target_url += "&n4pageno=10"
+            
+        rank_start = 16 if content == "!슈챔컷" else 196
+        rank_end = 20 if content == "!슈챔컷" else 200
+        
+        try:
+            # 현재 시즌 데이터 처리
+            current_season_data = get_rank_data(target_url, rank_start, rank_end)
+            if not current_season_data["success"]:
+                chat.reply("데이터를 가져오는 중 오류가 발생했습니다.")
+                return
+                
+            # 시즌 목록을 가져오기 위한 URL
+            season_list_url = "https://fconline.nexon.com/datacenter/rank?rt=manager"
+            headers = {"User-Agent": "Mozilla/5.0"}
+            
+            response = requests.get(season_list_url, headers=headers)
+            season_soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 시즌 목록 추출
+            season_elements = season_soup.select(".club_list.selector_list li a[onclick^=ChangeSeason]")
+            seasons = []
+            
+            # 시즌 정보 추출
+            for a_elem in season_elements:
+                season_name_text = a_elem.select_one("span").text if a_elem.select_one("span") else ""
+                
+                # "현재 시즌" 항목 건너뛰기
+                if "현재 시즌" in season_name_text:
+                    continue
+                    
+                onclick_attr = a_elem.get("onclick", "")
+                season_no_match = re.search(r"ChangeSeason\((\d+)\)", onclick_attr)
+                if season_no_match:
+                    season_no = season_no_match.group(1)
+                    season_name = season_name_text.split(" (")[0]  # 괄호 전까지만 추출
+                    seasons.append({
+                        "no": season_no,
+                        "name": season_name
+                    })
+                    if len(seasons) >= 5:
+                        break
+            
+            # 이전 시즌 데이터 가져오기
+            historical_data = []
+            for season in seasons:
+                season_url = f"https://fconline.nexon.com/datacenter/rank_inner?rt=manager&n4seasonno={season['no']}"
+                if content == "!주차컷":
+                    season_url += "&n4pageno=10"
+                    
+                target_rank = 20 if content == "!슈챔컷" else 200
+                season_data = get_rank_score(season_url, target_rank)
+                
+                if season_data["success"]:
+                    historical_data.append({
+                        "name": season["name"],
+                        "score": season_data["score"]
+                    })
+            
+            # 응답 메시지 구성
+            reply_msg = "순위\t점수\n" + "\n".join(current_season_data["rankings"]) + "\n\n"
+            reply_msg += f"※ {current_season_data['date_info']}\n\n"
+            
+            # 이전 시즌 데이터 추가
+            if historical_data:
+                for data in historical_data:
+                    reply_msg += f"{data['name']} : {data['score']}점\n"
+                    
+            chat.reply(reply_msg)
+        except Exception as e:
+            logger.error(f"데이터 처리 중 오류 발생: {str(e)}")
+            chat.reply(f"데이터를 가져오는 중 오류가 발생했습니다: {str(e)}")
+
+def get_ranking_1(chat):
+    """
+    랭킹1 명령어 처리 - 간소화된 랭킹 정보 제공
+    """
+    target_url = "https://fconline.nexon.com/datacenter/rank_inner?rt=manager"
+    
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+        }
+        response = requests.get(target_url, headers=headers)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            rank_rows = soup.select("div.tr")
+            rankings = []
+            
+            for row in rank_rows:
+                rank = row.select_one("span.rank_no").text
+                # 헤더 행이면 건너뛰기
+                if rank == "순위":
+                    continue
+                    
+                coach = row.select_one("span.rank_coach span.name.profile_pointer").text
+                score = row.select_one("span.rank_r_win_point").text
+                value = row.select_one("span.rank_coach span.price").text
+                
+                rank_output = (rank + "위").ljust(4, ' ')
+                score_output = score.ljust(13, ' ')
+                value_output = value.ljust(17, ' ')
+                rankings.append(f"{rank_output}{score_output}{value_output}{coach}")
+            
+            rank_advice = soup.select_one(".rank_advice").text if soup.select_one(".rank_advice") else ""
+            date_match = re.search(r"※ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) 기준 데이터", rank_advice)
+            date = date_match.group(1) if date_match else "날짜 정보 없음"
+            
+            reply_msg = "순위  점수            구단가치              감독명\n" + ALLSEE  + "\n" + "\n".join(rankings) + f"\n※ {date} 기준 데이터"
+            chat.reply(reply_msg)
+        else:
+            chat.reply(f"API 요청 중 오류 발생: {response.status_code}")
+    except Exception as e:
+        logger.error(f"랭킹1 조회 중 오류 발생: {str(e)}")
+        chat.reply(f"데이터를 가져오는 중 오류가 발생했습니다: {str(e)}")
+
+def get_ranking_2(chat):
+    """
+    랭킹2 명령어 처리 - 상세한 랭킹 정보 제공 (팀컬러 포함 및 비율 요약, 내림차순 정렬)
+    """
+    target_url = "https://fconline.nexon.com/datacenter/rank_inner?rt=manager"
+    try:
+        response = requests.get(target_url, headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/115.0.0.0 Safari/537.36"
+            )
+        })
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            rank_rows = soup.select("div.tr")
+            rankings = []
+            team_colors = []
+
+            reply_header = (
+                "순위     랭킹점수        전적(승/무/패)          승률         "
+                "구단가치             구단주                       팀컬러\n"
+            )
+
+            for row in rank_rows:
+                rank = row.select_one("span.rank_no").text
+                if rank == "순위":
+                    continue
+
+                win_rate = (
+                    row.select_one("span.rank_before span.top").text
+                    if row.select_one("span.rank_before span.top") else ""
+                )
+                win_loss = (
+                    row.select_one("span.rank_before span.bottom").text
+                    if row.select_one("span.rank_before span.bottom") else ""
+                )
+                score = row.select_one("span.rank_r_win_point").text
+                value = row.select_one("span.rank_coach span.price").text
+                coach = row.select_one("span.rank_coach span.name.profile_pointer").text
+
+                color_elem = row.select_one("span.team_color span.name span.inner")
+                team_color = color_elem.text.strip() if color_elem else "정보없음"
+                team_colors.append(team_color)
+
+                rank_out     = (rank + "위").ljust(8)
+                score_out    = score.ljust(15)
+                win_loss_out = win_loss.ljust(25)
+                win_rate_out = win_rate.ljust(10)
+                value_out    = value.ljust(20)
+                coach_out    = coach.ljust(20)
+                color_out    = team_color.ljust(12)
+
+                rankings.append(
+                    f"{rank_out}{score_out}{win_loss_out}"
+                    f"{win_rate_out}{value_out}{coach_out}{color_out}"
+                )
+
+            # 팀컬러 비율 계산 및 내림차순 정렬
+            from collections import Counter
+            counter = Counter(team_colors)
+            total_colors = sum(counter.values())
+            sorted_colors = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+            ratio_lines = [
+                f"{color.ljust(20)}{cnt/total_colors*100:5.1f}%({cnt}개)"
+                for color, cnt in sorted_colors
+            ]
+            ratio_summary = "팀컬러 비율:\n" + "\n".join(ratio_lines)
+
+            rank_advice = (
+                soup.select_one(".rank_advice").text
+                if soup.select_one(".rank_advice") else ""
+            )
+            date_match = re.search(
+                r"※ (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) 기준 데이터",
+                rank_advice
+            )
+            date_info = date_match.group(1) if date_match else "날짜 정보 없음"
+
+            # 텍스트 메시지 전송
+            reply_msg = (
+                reply_header + ALLSEE  + "\n" +
+                "\n".join(rankings) + "\n\n" +
+                ratio_summary +
+                f"\n\n※ {date_info} 기준 데이터"
+            )
+            chat.reply(reply_msg)
+            
+            # 팀컬러 비율 바 차트 생성 및 전송
+            try:
+                chart_filename = f"ranking2_team_colors_{int(datetime.now().timestamp())}.png"
+                chart_path = create_team_color_chart(sorted_colors, "상위 20위 팀컬러 비율", chart_filename)
+                
+                if chart_path and os.path.exists(chart_path):
+                    # 차트 이미지 전송
+                    with open(chart_path, "rb") as f:
+                        chat.reply_media("IMAGE", [f])
+                    
+                    # 임시 파일 정리
+                    os.remove(chart_path)
+                else:
+                    print("[ERROR] 랭킹2 팀컬러 차트 파일이 생성되지 않았습니다.")
+                    
+            except Exception as chart_error:
+                print(f"[ERROR] 랭킹2 팀컬러 차트 생성/전송 오류: {chart_error}")
+                import traceback
+                traceback.print_exc()
+        else:
+            chat.reply(f"요청 중 오류 발생: {response.status_code}")
+    except Exception as e:
+        chat.reply(f"데이터를 가져오는 중 오류가 발생했습니다: {e}")
+
+def create_team_color_chart(color_stats, title, filename):
+    """팀컬러 통계 바 차트 생성"""
+    try:
+        # 한글 폰트 설정
+        try:
+            # NanumGothic 폰트 경로 확인
+            nanum_font_path = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+            noto_font_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+            
+            if os.path.exists(nanum_font_path):
+                font_prop = fm.FontProperties(fname=nanum_font_path)
+                plt.rcParams['font.family'] = font_prop.get_name()
+            elif os.path.exists(noto_font_path):
+                font_prop = fm.FontProperties(fname=noto_font_path)
+                plt.rcParams['font.family'] = font_prop.get_name()
+            else:
+                # 시스템에 설치된 한글 폰트 찾기
+                plt.rcParams['font.family'] = 'NanumGothic'
+        except Exception as e:
+            logger.warning(f"한글 폰트 설정 실패: {e}")
+            plt.rcParams['font.family'] = 'DejaVu Sans'
+        
+        # 상위 15개만 표시 (너무 많으면 가독성이 떨어짐)
+        top_colors = color_stats[:15]
+        
+        # 데이터 준비
+        labels = []
+        counts = []
+        percentages = []
+        
+        total = sum(count for _, count in color_stats)
+        
+        for color, count in top_colors:
+            # 긴 팀 이름 축약
+            display_name = color if len(color) <= 12 else color[:10] + "..."
+            labels.append(display_name)
+            counts.append(count)
+            percentages.append(count / total * 100)
+        
+        # viridis colormap 사용 (상위 순위는 밝은 노란색, 하위 순위는 진한 보라/파란색)
+        colors = plt.cm.viridis(np.linspace(1, 0, len(labels)))  # 역순으로 하여 상위가 밝게
+        
+        # 차트 생성
+        fig, ax = plt.subplots(figsize=(14, 10))
+        bars = ax.barh(range(len(labels)), counts, color=colors)
+        
+        # 축 설정
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels)
+        ax.invert_yaxis()  # 상위 팀이 위에 오도록
+        ax.set_xlabel('개수', fontsize=12)
+        ax.set_title(title, fontsize=16, pad=20)
+        
+        # 바 위에 개수와 퍼센티지 표시
+        for i, (bar, count, pct) in enumerate(zip(bars, counts, percentages)):
+            width = bar.get_width()
+            ax.text(width + 0.5, bar.get_y() + bar.get_height()/2, 
+                   f'{count}개 ({pct:.1f}%)', 
+                   ha='left', va='center', fontsize=10)
+        
+        # 그리드 추가 (가독성 향상)
+        ax.grid(axis='x', alpha=0.3, linestyle='--')
+        
+        # 레이아웃 조정
+        plt.tight_layout()
+        
+        # 이미지 저장
+        plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        return filename
+        
+    except Exception as e:
+        print(f"[ERROR] 팀컬러 차트 생성 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def get_team_color_stats(chat):
+    """
+    '!팀컬러통계' 명령어 처리
+    – 전체 200명(10페이지) 팀컬러 통계
+    – 날짜/시간 표시 (맨 마지막)
+    – 컬러명 길이 자동 축약
+    – 동적 컬럼 너비 & ASCII 바 차트
+    – 긴 내용 접기
+    """
+    base_url = "https://fconline.nexon.com/datacenter/rank_inner?rt=manager&n4seasonno=0&n4pageno={}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/115.0.0.0 Safari/537.36"
+        )
+    }
+
+    # 1) 데이터 수집
+    team_colors = []
+    for page in range(1, 11):
+        try:
+            resp = requests.get(base_url.format(page), headers=headers)
+            if resp.status_code != 200:
+                logger.warning(f"페이지 {page} 실패: {resp.status_code}")
+                continue
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            for row in soup.select(".tbody .tr"):
+                elem = row.select_one(".td.team_color .name .inner")
+                if not elem:
+                    continue
+                color = re.sub(r"\s*\(\d+명\)$", "", elem.text.strip())
+                team_colors.append(color)
+        except Exception as e:
+            logger.error(f"페이지 {page} 처리 오류: {e}")
+
+    if not team_colors:
+        chat.reply("팀컬러 정보를 가져오지 못했습니다.")
+        return
+
+    # 2) 날짜/시간 파싱 (1페이지, 나중에 맨 아래에 출력)
+    try:
+        r1 = requests.get(base_url.format(1), headers=headers)
+        if r1.status_code == 200:
+            adv = BeautifulSoup(r1.text, 'html.parser').select_one(".rank_advice").text
+            m = re.search(r"※\s*(\d{4}-\d{2}-\d{2})\s*(\d{2}):\d{2}:\d{2}", adv)
+            date_info = f"{m.group(1)} {m.group(2)}시" if m else "날짜 정보 없음"
+        else:
+            date_info = "날짜 정보 없음"
+    except:
+        date_info = "날짜 정보 없음"
+
+    # 3) 통계 집계
+    counter = Counter(team_colors)
+    total = sum(counter.values())
+    stats = sorted(counter.items(), key=lambda x: x[1], reverse=True)
+
+    # 4) 텍스트 통계 생성 (바 차트는 제거)
+    lines = []
+    for color, cnt in stats:
+        pct = cnt / total * 100
+        lines.append(f"{color.ljust(20)}{str(cnt).rjust(3)}개   {pct:5.1f}%")
+
+    # 5) 텍스트 메시지 전송
+    header = f"팀컬러 통계 (1~{total}위)\n{ALLSEE}\n"
+    body = "\n".join(lines)
+    footer = f"\n\n※ {date_info} 데이터"
+    chat.reply(header + body + footer)
+    
+    # 6) 바 차트 생성 및 전송
+    try:
+        chart_filename = f"team_color_stats_{int(datetime.now().timestamp())}.png"
+        chart_path = create_team_color_chart(stats, f"팀컬러 통계 (1~{total}위)", chart_filename)
+        
+        if chart_path and os.path.exists(chart_path):
+            # 차트 이미지 전송
+            with open(chart_path, "rb") as f:
+                chat.reply_media("IMAGE", [f])
+            
+            # 임시 파일 정리
+            os.remove(chart_path)
+        else:
+            print("[ERROR] 팀컬러 통계 차트 파일이 생성되지 않았습니다.")
+            
+    except Exception as chart_error:
+        print(f"[ERROR] 팀컬러 통계 차트 생성/전송 오류: {chart_error}")
+        import traceback
+        traceback.print_exc()
+
+
+
+@bot.on_event("message")
+def on_message(chat: ChatContext):
+    """
+    메시지 이벤트 핸들러
+    """
+    content = chat.message.msg
+    
+    if content == "!랭킹1":
+        get_ranking_1(chat)
+    elif content == "!랭킹2":
+        get_ranking_2(chat)
+    elif content == "!슈챔컷" or content == "!주차컷":
+        find_stat(chat)
+    elif content == "!팀컬러통계":
+        get_team_color_stats(chat)
+
+@bot.on_event("error")
+def on_error(err):
+    """
+    오류 처리
+    """
+    logger.error(f"오류 발생: {err}")
+
+if __name__ == "__main__":
+    bot.run()

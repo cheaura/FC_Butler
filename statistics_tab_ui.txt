@@ -1,0 +1,536 @@
+  Widget _buildStatisticsTab() {
+    if (_statisticsLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // FC 채굴량 차트
+          _buildFCMiningChart(),
+          const SizedBox(height: 24),
+          
+          // 순위/점수 차트
+          _buildRankScoreChart(),
+          const SizedBox(height: 24),
+          
+          // 경기수 차트
+          _buildMatchCountChart(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFCMiningChart() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('FC 채굴량', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            // 필터 버튼
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildPeriodButton('1일', '1', _fcPeriod, (value) {
+                  setState(() {
+                    _fcPeriod = value;
+                    _showFCDatePicker = false;
+                  });
+                  _loadFCStatistics();
+                }),
+                _buildPeriodButton('7일', '7', _fcPeriod, (value) {
+                  setState(() {
+                    _fcPeriod = value;
+                    _showFCDatePicker = false;
+                  });
+                  _loadFCStatistics();
+                }),
+                _buildPeriodButton('30일', '30', _fcPeriod, (value) {
+                  setState(() {
+                    _fcPeriod = value;
+                    _showFCDatePicker = false;
+                  });
+                  _loadFCStatistics();
+                }),
+                _buildPeriodButton('기간 선택', 'custom', _fcPeriod, (value) {
+                  setState(() {
+                    _fcPeriod = value;
+                    _showFCDatePicker = true;
+                  });
+                }),
+              ],
+            ),
+            
+            if (_showFCDatePicker) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _fcStartDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _fcStartDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_fcStartDate != null 
+                        ? '${_fcStartDate!.year}-${_fcStartDate!.month.toString().padLeft(2, "0")}-${_fcStartDate!.day.toString().padLeft(2, "0")}'
+                        : '시작일'),
+                    ),
+                  ),
+                  const Text('~'),
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _fcEndDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _fcEndDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_fcEndDate != null 
+                        ? '${_fcEndDate!.year}-${_fcEndDate!.month.toString().padLeft(2, "0")}-${_fcEndDate!.day.toString().padLeft(2, "0")}'
+                        : '종료일'),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: (_fcStartDate != null && _fcEndDate != null) ? () {
+                      _loadFCStatistics();
+                    } : null,
+                    child: const Text('적용'),
+                  ),
+                ],
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // 차트
+            if (_fcMiningData != null && _fcMiningData!['data'] != null) ...[
+              SizedBox(
+                height: 200,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: (_fcMiningData!['data'] as List).length * 50.0 > 300 
+                      ? (_fcMiningData!['data'] as List).length * 50.0 
+                      : 300,
+                    child: LineChart(
+                      LineChartData(
+                        gridData: FlGridData(show: true),
+                        titlesData: FlTitlesData(
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (value, meta) {
+                                final data = _fcMiningData!['data'] as List;
+                                if (value.toInt() < data.length) {
+                                  return Text(data[value.toInt()]['label'] ?? '', 
+                                    style: const TextStyle(fontSize: 10));
+                                }
+                                return const Text('');
+                              },
+                            ),
+                          ),
+                          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        borderData: FlBorderData(show: true),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: (_fcMiningData!['data'] as List).asMap().entries.map((entry) {
+                              return FlSpot(
+                                entry.key.toDouble(), 
+                                (entry.value['value'] ?? 0).toDouble()
+                              );
+                            }).toList(),
+                            isCurved: true,
+                            color: Theme.of(context).primaryColor,
+                            barWidth: 2,
+                            dotData: FlDotData(show: true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ] else
+              const Center(child: Text('데이터가 없습니다')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRankScoreChart() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('순위/점수', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            // 필터 버튼
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildPeriodButton('4시간', '4h', _rankPeriod, (value) {
+                  setState(() {
+                    _rankPeriod = value;
+                    _showRankDatePicker = false;
+                  });
+                  _loadRankScoreStatistics();
+                }),
+                _buildPeriodButton('8시간', '8h', _rankPeriod, (value) {
+                  setState(() {
+                    _rankPeriod = value;
+                    _showRankDatePicker = false;
+                  });
+                  _loadRankScoreStatistics();
+                }),
+                _buildPeriodButton('12시간', '12h', _rankPeriod, (value) {
+                  setState(() {
+                    _rankPeriod = value;
+                    _showRankDatePicker = false;
+                  });
+                  _loadRankScoreStatistics();
+                }),
+                _buildPeriodButton('24시간', '24h', _rankPeriod, (value) {
+                  setState(() {
+                    _rankPeriod = value;
+                    _showRankDatePicker = false;
+                  });
+                  _loadRankScoreStatistics();
+                }),
+                _buildPeriodButton('기간 선택', 'custom', _rankPeriod, (value) {
+                  setState(() {
+                    _rankPeriod = value;
+                    _showRankDatePicker = true;
+                  });
+                }),
+              ],
+            ),
+            
+            if (_showRankDatePicker) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _rankStartDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _rankStartDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_rankStartDate != null 
+                        ? '${_rankStartDate!.year}-${_rankStartDate!.month.toString().padLeft(2, "0")}-${_rankStartDate!.day.toString().padLeft(2, "0")}'
+                        : '시작일'),
+                    ),
+                  ),
+                  const Text('~'),
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _rankEndDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _rankEndDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_rankEndDate != null 
+                        ? '${_rankEndDate!.year}-${_rankEndDate!.month.toString().padLeft(2, "0")}-${_rankEndDate!.day.toString().padLeft(2, "0")}'
+                        : '종료일'),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: (_rankStartDate != null && _rankEndDate != null) ? () {
+                      _loadRankScoreStatistics();
+                    } : null,
+                    child: const Text('적용'),
+                  ),
+                ],
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // 차트 (순위와 점수 두 라인)
+            if (_rankScoreData != null && _rankScoreData!['data'] != null) ...[
+              SizedBox(
+                height: 200,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: (_rankScoreData!['data'] as List).length * 50.0 > 300 
+                      ? (_rankScoreData!['data'] as List).length * 50.0 
+                      : 300,
+                    child: LineChart(
+                      LineChartData(
+                        gridData: FlGridData(show: true),
+                        titlesData: FlTitlesData(
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (value, meta) {
+                                final data = _rankScoreData!['data'] as List;
+                                if (value.toInt() < data.length) {
+                                  return Text(data[value.toInt()]['label'] ?? '', 
+                                    style: const TextStyle(fontSize: 10));
+                                }
+                                return const Text('');
+                              },
+                            ),
+                          ),
+                          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        borderData: FlBorderData(show: true),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: (_rankScoreData!['data'] as List).asMap().entries.map((entry) {
+                              return FlSpot(
+                                entry.key.toDouble(), 
+                                (entry.value['rank'] ?? 0).toDouble()
+                              );
+                            }).toList(),
+                            isCurved: true,
+                            color: Colors.blue,
+                            barWidth: 2,
+                            dotData: FlDotData(show: true),
+                          ),
+                          LineChartBarData(
+                            spots: (_rankScoreData!['data'] as List).asMap().entries.map((entry) {
+                              return FlSpot(
+                                entry.key.toDouble(), 
+                                (entry.value['score'] ?? 0).toDouble()
+                              );
+                            }).toList(),
+                            isCurved: true,
+                            color: Colors.orange,
+                            barWidth: 2,
+                            dotData: FlDotData(show: true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(width: 12, height: 12, color: Colors.blue),
+                  const SizedBox(width: 4),
+                  const Text('순위', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 16),
+                  Container(width: 12, height: 12, color: Colors.orange),
+                  const SizedBox(width: 4),
+                  const Text('점수', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ] else
+              const Center(child: Text('데이터가 없습니다')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMatchCountChart() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('경기수', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            // 필터 버튼
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildPeriodButton('7일', '7', _matchPeriod, (value) {
+                  setState(() {
+                    _matchPeriod = value;
+                    _showMatchDatePicker = false;
+                  });
+                  _loadMatchCountStatistics();
+                }),
+                _buildPeriodButton('30일', '30', _matchPeriod, (value) {
+                  setState(() {
+                    _matchPeriod = value;
+                    _showMatchDatePicker = false;
+                  });
+                  _loadMatchCountStatistics();
+                }),
+                _buildPeriodButton('기간 선택', 'custom', _matchPeriod, (value) {
+                  setState(() {
+                    _matchPeriod = value;
+                    _showMatchDatePicker = true;
+                  });
+                }),
+              ],
+            ),
+            
+            if (_showMatchDatePicker) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _matchStartDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _matchStartDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_matchStartDate != null 
+                        ? '${_matchStartDate!.year}-${_matchStartDate!.month.toString().padLeft(2, "0")}-${_matchStartDate!.day.toString().padLeft(2, "0")}'
+                        : '시작일'),
+                    ),
+                  ),
+                  const Text('~'),
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () async {
+                        final date = await showDatePicker(
+                          context: context,
+                          initialDate: _matchEndDate ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (date != null) {
+                          setState(() {
+                            _matchEndDate = date;
+                          });
+                        }
+                      },
+                      child: Text(_matchEndDate != null 
+                        ? '${_matchEndDate!.year}-${_matchEndDate!.month.toString().padLeft(2, "0")}-${_matchEndDate!.day.toString().padLeft(2, "0")}'
+                        : '종료일'),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: (_matchStartDate != null && _matchEndDate != null) ? () {
+                      _loadMatchCountStatistics();
+                    } : null,
+                    child: const Text('적용'),
+                  ),
+                ],
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // 차트 (바 차트)
+            if (_matchCountData != null && _matchCountData!['data'] != null) ...[
+              SizedBox(
+                height: 200,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: (_matchCountData!['data'] as List).length * 50.0 > 300 
+                      ? (_matchCountData!['data'] as List).length * 50.0 
+                      : 300,
+                    child: BarChart(
+                      BarChartData(
+                        gridData: FlGridData(show: true),
+                        titlesData: FlTitlesData(
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                          ),
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (value, meta) {
+                                final data = _matchCountData!['data'] as List;
+                                if (value.toInt() < data.length) {
+                                  return Text(data[value.toInt()]['label'] ?? '', 
+                                    style: const TextStyle(fontSize: 10));
+                                }
+                                return const Text('');
+                              },
+                            ),
+                          ),
+                          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        borderData: FlBorderData(show: true),
+                        barGroups: (_matchCountData!['data'] as List).asMap().entries.map((entry) {
+                          return BarChartGroupData(
+                            x: entry.key,
+                            barRods: [
+                              BarChartRodData(
+                                toY: (entry.value['value'] ?? 0).toDouble(),
+                                color: Theme.of(context).primaryColor,
+                                width: 16,
+                              ),
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ] else
+              const Center(child: Text('데이터가 없습니다')),
+          ],
+        ),
+      ),
+    );
+  }

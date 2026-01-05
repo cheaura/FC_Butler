@@ -1,0 +1,49 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    // Add the Google services Gradle plugin
+    id "com.google.gms.google-services"
+}
+
+android {
+    namespace = "com.example.fc_macro_app"
+    compileSdk = 34
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+
+    defaultConfig {
+        applicationId = "com.example.fc_macro_app"
+        minSdk = 23
+        targetSdk = 34
+        versionCode 9
+        versionName "1.0.8"
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.20"
+    
+    // Import the Firebase BoM
+    implementation platform('com.google.firebase:firebase-bom:34.7.0')
+    
+    // Firebase Messaging (FCM)
+    implementation 'com.google.firebase:firebase-messaging'
+}
+
+flutter {
+    source = "../.."
+}

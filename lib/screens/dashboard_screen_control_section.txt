@@ -1,0 +1,291 @@
+﻿  Widget _buildControlSection(String username, bool isOnline, bool isRunning, String currentMode) {
+    String selectedMode = 'coach';
+    bool clubDonation = false;
+    bool showParkingConditions = false;
+    
+    // 주차모드 조건
+    bool tierEnabled = false;
+    String selectedTier = '슈퍼챔피언스감독';
+    bool rankEnabled = false;
+    int? rankValue;
+    String rankCondition = '이하';
+    bool scoreEnabled = false;
+    int? scoreValue;
+    String scoreCondition = '이상';
+
+    return StatefulBuilder(
+      builder: (context, setState) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 중지 버튼
+            if (isRunning) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _stopMacro(username),
+                  icon: const Icon(Icons.stop),
+                  label: const Text('중지'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            // 모드 선택 + 시작 버튼
+            if (!isRunning && isOnline) ...[
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      value: selectedMode,
+                      decoration: const InputDecoration(
+                        labelText: '모드',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'coach', child: Text(' 감독모드')),
+                        DropdownMenuItem(value: 'league', child: Text(' 리그모드')),
+                        DropdownMenuItem(value: 'parking', child: Text(' 주차모드')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          selectedMode = value!;
+                          showParkingConditions = (value == 'parking');
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Map<String, dynamic>? parkingConditions;
+                        
+                        if (selectedMode == 'parking') {
+                          if (!tierEnabled && !rankEnabled && !scoreEnabled) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('주차모드 조건을 최소 1개 이상 선택해주세요.'), backgroundColor: Colors.red),
+                            );
+                            return;
+                          }
+                          
+                          parkingConditions = {};
+                          if (tierEnabled) {
+                            parkingConditions['tier'] = selectedTier;
+                          }
+                          if (rankEnabled) {
+                            if (rankValue == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('순위를 입력해주세요.'), backgroundColor: Colors.red),
+                              );
+                              return;
+                            }
+                            parkingConditions['rank'] = {'value': rankValue, 'condition': rankCondition};
+                          }
+                          if (scoreEnabled) {
+                            if (scoreValue == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('점수를 입력해주세요.'), backgroundColor: Colors.red),
+                              );
+                              return;
+                            }
+                            parkingConditions['score'] = {'value': scoreValue, 'condition': scoreCondition};
+                          }
+                        }
+                        
+                        _startMacro(username, selectedMode, clubDonation, parkingConditions: parkingConditions);
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('시작'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1a237e),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              
+              // 주차모드 조건
+              if (showParkingConditions) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(' 주차모드 조건:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      
+                      // 티어 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: tierEnabled,
+                            onChanged: (value) => setState(() => tierEnabled = value!),
+                          ),
+                          const Text('티어'),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedTier,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(value: '슈퍼챔피언스감독', child: Text('슈퍼챔피언스감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챔피언스감독', child: Text('챔피언스감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '슈퍼챌린저감독', child: Text('슈퍼챌린저감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저1부감독', child: Text('챌린저1부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저2부감독', child: Text('챌린저2부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '챌린저3부감독', child: Text('챌린저3부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '월드클래스1부감독', child: Text('월드클래스1부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '월드클래스2부감독', child: Text('월드클래스2부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '월드클래스3부감독', child: Text('월드클래스3부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '프로1부감독', child: Text('프로1부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '프로2부감독', child: Text('프로2부감독', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '프로3부감독', child: Text('프로3부감독', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: tierEnabled ? (value) => setState(() => selectedTier = value!) : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      // 순위 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: rankEnabled,
+                            onChanged: (value) => setState(() => rankEnabled = value!),
+                          ),
+                          const Text('순위'),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                hintText: '순위',
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              keyboardType: TextInputType.number,
+                              enabled: rankEnabled,
+                              onChanged: (value) => rankValue = int.tryParse(value),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: rankCondition,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(value: '이하', child: Text('이하', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '이상', child: Text('이상', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: rankEnabled ? (value) => setState(() => rankCondition = value!) : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      
+                      // 점수 조건
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: scoreEnabled,
+                            onChanged: (value) => setState(() => scoreEnabled = value!),
+                          ),
+                          const Text('점수'),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                hintText: '점수',
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              keyboardType: TextInputType.number,
+                              enabled: scoreEnabled,
+                              onChanged: (value) => scoreValue = int.tryParse(value),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: scoreCondition,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                isDense: true,
+                              ),
+                              items: const [
+                                DropdownMenuItem(value: '이상', child: Text('이상', style: TextStyle(fontSize: 12))),
+                                DropdownMenuItem(value: '이하', child: Text('이하', style: TextStyle(fontSize: 12))),
+                              ],
+                              onChanged: scoreEnabled ? (value) => setState(() => scoreCondition = value!) : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              
+              CheckboxListTile(
+                value: clubDonation,
+                onChanged: (value) {
+                  setState(() {
+                    clubDonation = value!;
+                  });
+                },
+                title: const Text(' 클럽 기부 (5경기마다)', style: TextStyle(fontSize: 14)),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
+            ],
+
+            if (!isOnline) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 20, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Text('오프라인 상태에서는 제어할 수 없습니다.', style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
