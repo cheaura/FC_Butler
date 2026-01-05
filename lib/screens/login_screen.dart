@@ -36,11 +36,13 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     if (result['success']) {
-      // 로그인 성공 후 FCM 토큰 서버 전송 (에러 발생해도 계속 진행)
+      // 로그인 성공 후 FCM 토큰 서버 전송
       try {
         await FCMService().getTokenAndSendToServer();
       } catch (e) {
-        print('[로그인] FCM 토큰 전송 실패 (무시하고 계속): $e');
+        // iOS 시뮬레이터 등에서 APNS 토큰이 없을 수 있음
+        // 실제 기기에서는 정상 작동함
+        print('[로그인] FCM 토큰 전송 실패 (시뮬레이터 또는 권한 없음): $e');
       }
       
       Navigator.pushReplacement(
