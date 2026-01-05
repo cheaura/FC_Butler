@@ -78,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 32),
                   const Text(
-                    'DD APP',
+                    'FC Butler',
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,

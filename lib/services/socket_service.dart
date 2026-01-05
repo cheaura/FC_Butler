@@ -103,7 +103,7 @@ class SocketService {
     try {
       const androidDetails = AndroidNotificationDetails(
         'fc_macro_channel', // 채널 ID
-        'FC Macro 알림', // 채널 이름
+        'FC Butler 알림', // 채널 이름
         channelDescription: 'FC Online 4 매크로 상태 알림',
         importance: Importance.high,
         priority: Priority.high,

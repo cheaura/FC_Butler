@@ -99,7 +99,7 @@ class ThemeProvider with ChangeNotifier {
           borderSide: BorderSide(color: Color(0xFF1976D2), width: 2),
         ),
       ),
-      cardTheme: const CardTheme(
+      cardTheme: const CardThemeData(
         color: Color(0xFF1E1E1E),
         elevation: 4,
       ),

@@ -40,7 +40,7 @@ class FCMacroApp extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
     
     return MaterialApp(
-      title: 'FC Macro',
+      title: 'FC Butler',
       debugShowCheckedModeBanner: false,
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
@@ -125,7 +125,7 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
               SizedBox(height: 24),
               Text(
-                'FC Macro',
+                'FC Butler',
                 style: TextStyle(
                   fontSize: 36,
                   fontWeight: FontWeight.bold,
