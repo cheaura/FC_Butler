@@ -139,7 +139,7 @@ class ApiService {
       }
     } catch (e) {
       print('[API] 로그인 오류: $e');
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -156,10 +156,10 @@ class ApiService {
       final response = await http.get(
         Uri.parse('$baseUrl/api/user/dashboard/status'),
         headers: {'Authorization': 'Bearer $_token'},
-      );
+      ).timeout(const Duration(seconds: 10));
 
       print('[API] getDashboardStatus 응답: ${response.statusCode}');
-      
+
       if (response.statusCode == 200) {
         return json.decode(response.body);
       } else {
@@ -168,7 +168,7 @@ class ApiService {
       }
     } catch (e) {
       print('[API] 네트워크 오류: $e');
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -183,7 +183,7 @@ class ApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $_token'},
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -191,7 +191,7 @@ class ApiService {
         return {'success': false, 'message': 'FC 채굴량 조회 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -206,7 +206,7 @@ class ApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $_token'},
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -214,7 +214,7 @@ class ApiService {
         return {'success': false, 'message': '순위/점수 조회 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -229,7 +229,7 @@ class ApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer $_token'},
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -237,7 +237,7 @@ class ApiService {
         return {'success': false, 'message': '경기수 조회 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -272,7 +272,7 @@ class ApiService {
         return {'success': false, 'message': '전적 조회 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -309,7 +309,7 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? '제어 명령 전송 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -346,7 +346,7 @@ class ApiService {
         return {'success': false, 'message': '알림 조회 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
   
@@ -366,7 +366,7 @@ class ApiService {
         return {'success': false, 'message': '로그아웃 실패'};
       }
     } catch (e) {
-      return {'success': false, 'message': '네트워크 오류: $e'};
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
   

@@ -32,7 +32,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   List<Map<String, dynamic>> _accounts = [];
   bool _isLoading = true;
   bool _isInputting = false;  // 사용자 입력 중 플래그
-  bool _statisticsLoading = false;  // 통계 로딩 플래그
+  int _statisticsLoadingCount = 0;  // 통계 로딩 카운터 (3개 API 동시 로딩)
+  bool get _statisticsLoading => _statisticsLoadingCount > 0;
   late TabController _tabController;
   String _selectedAccount = '';
   
@@ -85,12 +86,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     
     // 탭 전환 리스너 추가
     _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return; // 탭 전환 애니메이션 중 중복 발화 방지
       setState(() {}); // AppBar 조건부 버튼 업데이트
       if (_tabController.index == 1 && _selectedAccount != null && _selectedAccount!.isNotEmpty) {
-        // 통계 탭으로 전환 시 데이터 로드
-        _loadFCStatistics();
-        _loadRankScoreStatistics();
-        _loadMatchCountStatistics();
+        // 통계 탭으로 전환 시 데이터 로드 (이미 로딩 중이면 중복 방지)
+        if (!_statisticsLoading) {
+          _loadFCStatistics();
+          _loadRankScoreStatistics();
+          _loadMatchCountStatistics();
+        }
       } else if (_tabController.index == 2 && _selectedAccount != null && _selectedAccount!.isNotEmpty) {
         // 전적 탭으로 전환 시 데이터 로드
         _loadMatchHistory();
@@ -138,15 +142,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 // API 호출 함수들
   Future<void> _loadFCStatistics() async {
     if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
-    
+
     setState(() {
-      _statisticsLoading = true;
+      _statisticsLoadingCount++;
     });
 
     try {
       String? startDate;
       String? endDate;
-      
+
       if (_fcPeriod == 'custom') {
         if (_fcStartDate != null && _fcEndDate != null) {
           startDate = '${_fcStartDate!.year}-${_fcStartDate!.month.toString().padLeft(2, "0")}-${_fcStartDate!.day.toString().padLeft(2, "0")}';
@@ -163,11 +167,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
       setState(() {
         _fcMiningData = data;
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
     } catch (e) {
       setState(() {
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -179,15 +183,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   Future<void> _loadRankScoreStatistics() async {
     if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
-    
+
     setState(() {
-      _statisticsLoading = true;
+      _statisticsLoadingCount++;
     });
 
     try {
       String? startDate;
       String? endDate;
-      
+
       if (_rankPeriod == 'custom') {
         if (_rankStartDate != null && _rankEndDate != null) {
           startDate = '${_rankStartDate!.year}-${_rankStartDate!.month.toString().padLeft(2, "0")}-${_rankStartDate!.day.toString().padLeft(2, "0")}';
@@ -204,11 +208,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
       setState(() {
         _rankScoreData = data;
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
     } catch (e) {
       setState(() {
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -220,15 +224,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   Future<void> _loadMatchCountStatistics() async {
     if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
-    
+
     setState(() {
-      _statisticsLoading = true;
+      _statisticsLoadingCount++;
     });
 
     try {
       String? startDate;
       String? endDate;
-      
+
       if (_matchPeriod == 'custom') {
         if (_matchStartDate != null && _matchEndDate != null) {
           startDate = '${_matchStartDate!.year}-${_matchStartDate!.month.toString().padLeft(2, "0")}-${_matchStartDate!.day.toString().padLeft(2, "0")}';
@@ -246,11 +250,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
       setState(() {
         _matchCountData = data;
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
     } catch (e) {
       setState(() {
-        _statisticsLoading = false;
+        _statisticsLoadingCount--;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -353,9 +357,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       setState(() {
         _isLoading = false;
       });
-      if (mounted && result['message'] != null) {
+      // 연결 오류는 조용히 처리 (60초 주기 자동 갱신 중 반복 노출 방지)
+      // 인증 실패 등 서버 응답 오류만 사용자에게 표시
+      final msg = result['message'];
+      if (mounted && msg != null && msg != '서버 연결 오류') {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('상태 로드 실패: ${result['message']}')),
+          SnackBar(content: Text('상태 로드 실패: $msg')),
         );
       }
     }
@@ -565,6 +572,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final isOnline = status == 'online';
     final isRunning = isOnline && mode.isNotEmpty && mode != 'stopped' && mode != '정지';
 
+    // 인게임 상태
+    final ingameTime = account['ingame_time'] as String?;
+    final ingameMyScore = account['ingame_my_score'];
+    final ingameOppScore = account['ingame_opp_score'];
+    final isMatching = ingameTime == '매칭대기중';
+    final isPenaltyKick = ingameTime == '승부차기중';
+    final isPlaying = ingameTime != null && !isMatching && !isPenaltyKick;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 4,
@@ -621,6 +636,80 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ],
             ),
             const SizedBox(height: 16),
+            // 인게임 상태 배너 (경기 중 / 승부차기 중 / 매칭대기중)
+            if (ingameTime != null) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isPlaying
+                      ? Colors.green.withOpacity(0.12)
+                      : isPenaltyKick
+                          ? Colors.orange.withOpacity(0.12)
+                          : Colors.amber.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border(
+                    left: BorderSide(
+                      color: isPlaying
+                          ? Colors.green
+                          : isPenaltyKick
+                              ? Colors.orange
+                              : Colors.amber,
+                      width: 4,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          isPlaying
+                              ? Icons.sports_soccer
+                              : isPenaltyKick
+                                  ? Icons.sports_score
+                                  : Icons.hourglass_empty,
+                          size: 16,
+                          color: isPlaying
+                              ? Colors.green[700]
+                              : isPenaltyKick
+                                  ? Colors.orange[700]
+                                  : Colors.amber[800],
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isPlaying
+                              ? '경기 중  $ingameTime'
+                              : isPenaltyKick
+                                  ? '승부차기 중'
+                                  : '매칭대기중',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: isPlaying
+                                ? Colors.green[700]
+                                : isPenaltyKick
+                                    ? Colors.orange[700]
+                                    : Colors.amber[800],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (isPlaying)
+                      Text(
+                        '${ingameMyScore ?? '-'} : ${ingameOppScore ?? '-'}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          letterSpacing: 2,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -635,7 +724,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 _buildInfoItem(Icons.leaderboard, '순위', _formatNumber(rank)),
                 _buildInfoItem(Icons.poll, '전적(승-무-패)', record),
                 _buildInfoItem(Icons.monetization_on, 'FC', '$fcTotal FC'),
-                _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore)),
+                _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore), subtitle: highestScoreTime.isNotEmpty ? highestScoreTime : null),
                 if (account['protection_status'] != null && account['protection_status'].toString().isNotEmpty)
                   _buildInfoItem(
                     account['protection_status'] == '보호날' ? Icons.shield : Icons.warning,
@@ -644,13 +733,21 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   ),
               ],
             ),
-            if (highestScoreTime.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                '  최고점수 달성: $highestScoreTime',
-                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-              ),
-            ],
+            // 최근 5경기 승무패 도트
+            Builder(builder: (context) {
+              // recent_results가 String 또는 Map({result, my_score, ...}) 두 형식 모두 처리
+              final rawResults = account['recent_results'] ?? [];
+              final recentResults = (rawResults as List).map<String>((r) {
+                if (r is String) return r;
+                if (r is Map) return (r['result'] as String?) ?? '';
+                return '';
+              }).where((r) => r.isNotEmpty).toList();
+              if (recentResults.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _buildRecentGamesDots(recentResults),
+              );
+            }),
             const Divider(height: 24),
             _buildControlSection(username, isOnline, isRunning, mode),
             const SizedBox(height: 12),
@@ -670,7 +767,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildInfoItem(IconData icon, String label, String value) {
+  Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle}) {
     return Row(
       children: [
         Icon(icon, size: 16, color: Colors.blue[700]),
@@ -689,8 +786,44 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                 overflow: TextOverflow.ellipsis,
               ),
+              if (subtitle != null && subtitle.isNotEmpty)
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 9, color: Colors.grey[500]),
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentGamesDots(List<String> results) {
+    final wins = results.where((r) => r == 'WIN').length;
+    final draws = results.where((r) => r == 'DRAW').length;
+    final losses = results.where((r) => r == 'LOSE').length;
+    return Row(
+      children: [
+        ...results.map((r) {
+          final color = r == 'WIN'
+              ? const Color(0xFF2196F3)
+              : r == 'DRAW'
+                  ? const Color(0xFFFFC107)
+                  : const Color(0xFFF44336);
+          final symbol = r == 'DRAW' ? '▲' : '●';
+          return Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Text(
+              symbol,
+              style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+          );
+        }),
+        const SizedBox(width: 6),
+        Text(
+          '$wins승 $draws무 $losses패',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
         ),
       ],
     );
@@ -1172,7 +1305,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             
             
             // 차트
-            if (_fcMiningData != null && _fcMiningData!['daily_data'] != null) ...[
+            if (_fcMiningData != null && _fcMiningData!['daily_data'] != null && (_fcMiningData!['daily_data'] as List).isNotEmpty) ...[
               Container(
                 height: 350,
                 padding: const EdgeInsets.only(right: 16, top: 50, bottom: 8),
@@ -1965,7 +2098,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             
             
             // 차트 (바 차트)
-            if (_matchCountData != null && _matchCountData!['daily_data'] != null) ...[
+            if (_matchCountData != null && _matchCountData!['daily_data'] != null && (_matchCountData!['daily_data'] as List).isNotEmpty) ...[
               Container(
                 height: 350,
                 padding: const EdgeInsets.only(right: 16, top: 50, bottom: 8),
