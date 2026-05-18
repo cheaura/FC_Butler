@@ -3166,7 +3166,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 }
 
-/// 최근 경기 도트 위젯 — 최대 20개 표시, 좌우 스와이프로 이전 경기 조회, 기본 버튼으로 복귀
+/// 최근 경기 도트 위젯 — PageView 스와이프로 20개씩 탐색, 승무패 배지 표시
 class _RecentGamesDots extends StatefulWidget {
   final List<String> results;
   const _RecentGamesDots({required this.results});
@@ -3176,110 +3176,130 @@ class _RecentGamesDots extends StatefulWidget {
 }
 
 class _RecentGamesDotsState extends State<_RecentGamesDots> {
-  int _offset = 0; // 0=최신 20경기, 20=그 이전 20경기...
-  static const int _page = 20;
+  late PageController _pageController;
+  int _currentPage = 0;
+  static const int _perPage = 20;
 
-  List<String> get _view {
-    final total = widget.results.length;
-    final end = total - _offset;
-    final start = (end - _page).clamp(0, total);
-    return widget.results.sublist(start.clamp(0, total), end.clamp(0, total));
+  // 최신순으로 뒤집어서 page 0 = 최신 20경기
+  List<String> get _reversed => widget.results.reversed.toList();
+  int get _totalPages => (_reversed.length / _perPage).ceil();
+
+  List<String> _pageResults(int pageIndex) {
+    final start = pageIndex * _perPage;
+    final end = (start + _perPage).clamp(0, _reversed.length);
+    return _reversed.sublist(start, end);
   }
 
-  String get _summaryText {
-    final view = _view;
-    final wins = view.where((r) => r == 'WIN').length;
-    final draws = view.where((r) => r == 'DRAW').length;
-    final losses = view.where((r) => r == 'LOSE').length;
-    if (_offset == 0) return '$wins승 $draws무 $losses패';
-    final total = widget.results.length;
-    final rangeEnd = total - _offset;
-    final rangeStart = (rangeEnd - _page + 1).clamp(1, total);
-    return '$rangeStart~$rangeEnd번째 | $wins승 $draws무 $losses패';
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: 0);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.results.length;
-    final canPrev = (_offset + _page) < total;
-    final canNext = _offset > 0;
+    if (widget.results.isEmpty) return const SizedBox.shrink();
+
+    final pageResults = _pageResults(_currentPage);
+    final wins   = pageResults.where((r) => r == 'WIN').length;
+    final draws  = pageResults.where((r) => r == 'DRAW').length;
+    final losses = pageResults.where((r) => r == 'LOSE').length;
+    final canLeft  = _currentPage > 0;               // 최신 방향
+    final canRight = _currentPage < _totalPages - 1; // 과거 방향
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 도트 영역
         Row(
           children: [
-            // ◀ 버튼
-            GestureDetector(
-              onTap: canPrev ? () => setState(() => _offset += _page) : null,
-              child: Text('◀',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: canPrev ? Colors.grey[600] : Colors.grey[300],
-                      fontWeight: FontWeight.bold)),
+            Text('◀',
+              style: TextStyle(
+                fontSize: 11,
+                color: canLeft ? Colors.grey[500] : Colors.grey[300],
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(width: 4),
-            // 도트 영역 (가로 스크롤)
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _view.map((r) {
-                    final color = r == 'WIN'
-                        ? const Color(0xFF2196F3)
-                        : r == 'DRAW'
-                            ? const Color(0xFFFFC107)
-                            : const Color(0xFFF44336);
-                    final symbol = r == 'DRAW' ? '▲' : '●';
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 3),
-                      child: Text(symbol,
+              child: SizedBox(
+                height: 22,
+                child: PageView.builder(
+                  controller: _pageController,
+                  itemCount: _totalPages,
+                  onPageChanged: (page) => setState(() => _currentPage = page),
+                  itemBuilder: (context, pageIndex) {
+                    final dots = _pageResults(pageIndex);
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: dots.map((r) {
+                        final color = r == 'WIN'
+                            ? const Color(0xFF2196F3)
+                            : r == 'DRAW'
+                                ? const Color(0xFFFFC107)
+                                : const Color(0xFFF44336);
+                        return Text(
+                          r == 'DRAW' ? '▲' : '●',
                           style: TextStyle(
-                              color: color,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold)),
+                            color: color,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }).toList(),
                     );
-                  }).toList(),
+                  },
                 ),
               ),
             ),
             const SizedBox(width: 4),
-            // ▶ 버튼
-            GestureDetector(
-              onTap: canNext ? () => setState(() => _offset = (_offset - _page).clamp(0, total)) : null,
-              child: Text('▶',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: canNext ? Colors.grey[600] : Colors.grey[300],
-                      fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(width: 6),
-            // 기본 버튼
-            GestureDetector(
-              onTap: _offset > 0 ? () => setState(() => _offset = 0) : null,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                      color: _offset > 0 ? const Color(0xFF2196F3) : Colors.grey[400]!),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text('기본',
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: _offset > 0 ? const Color(0xFF2196F3) : Colors.grey[400],
-                        fontWeight: FontWeight.bold)),
+            Text('▶',
+              style: TextStyle(
+                fontSize: 11,
+                color: canRight ? Colors.grey[500] : Colors.grey[300],
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 3),
-        // 2행: 요약 텍스트
-        Text(
-          _summaryText,
-          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
+        const SizedBox(height: 8),
+        // 승무패 배지 (가운데 정렬)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _badge('${wins}승', const Color(0xFF2196F3)),
+            const SizedBox(width: 8),
+            _badge('${draws}무', const Color(0xFFFFC107)),
+            const SizedBox(width: 8),
+            _badge('${losses}패', const Color(0xFFF44336)),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _badge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          color: color,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
