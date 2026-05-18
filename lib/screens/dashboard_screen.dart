@@ -448,7 +448,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 child: Text(
                   _seasonDaysRemaining! <= 0
                       ? '시즌종료'
-                      : 'D-$_seasonDaysRemaining',
+                      : '시즌종료 D-$_seasonDaysRemaining',
                   style: const TextStyle(
                     fontSize: 11,
                     color: Colors.white,
