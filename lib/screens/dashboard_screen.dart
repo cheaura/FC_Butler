@@ -3180,14 +3180,15 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
   int _currentPage = 0;
   static const int _perPage = 20;
 
-  // 최신순으로 뒤집어서 page 0 = 최신 20경기
-  List<String> get _reversed => widget.results.reversed.toList();
-  int get _totalPages => (_reversed.length / _perPage).ceil();
+  // 클라이언트와 동일: 왼쪽=오래된, 오른쪽=최신
+  // page 0 = 최신 20경기, page 1 = 그 이전 20경기, ...
+  int get _totalPages => (widget.results.length / _perPage).ceil();
 
   List<String> _pageResults(int pageIndex) {
-    final start = pageIndex * _perPage;
-    final end = (start + _perPage).clamp(0, _reversed.length);
-    return _reversed.sublist(start, end);
+    final total = widget.results.length;
+    final end = total - pageIndex * _perPage;
+    final start = (end - _perPage).clamp(0, total);
+    return widget.results.sublist(start, end.clamp(0, total));
   }
 
   @override
