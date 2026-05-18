@@ -428,12 +428,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           children: [
             Icon(Icons.sports_soccer, size: 24),
             SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                'FC Online 4',
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            Text('FC Online 4'),
           ],
         ),
         backgroundColor: const Color(0xFF1a237e),
@@ -442,7 +437,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 100),
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: _seasonDaysRemaining! <= 0
@@ -461,8 +455,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                   ),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
                 ),
               ),
             ),
