@@ -372,5 +372,21 @@ class ApiService {
   
   // ===== 랭킹/컷라인 조회 API 제거됨 =====
   // Flutter 앱에서 직접 Nexon 웹페이지 크롤링하도록 변경
-}
 
+  // 시즌 D-day 조회
+  Future<Map<String, dynamic>> getSeasonInfo() async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/season_info');
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $_token'},
+      );
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      }
+      return {'success': false};
+    } catch (e) {
+      return {'success': false};
+    }
+  }
+}

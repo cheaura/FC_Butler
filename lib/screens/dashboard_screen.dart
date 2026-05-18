@@ -77,6 +77,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   bool _rankingLoading = false;
   String _rankingDateInfo = '';
 
+  // 시즌 D-day
+  int? _seasonDaysRemaining;
+
   @override
   void initState() {
     super.initState();
@@ -105,7 +108,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     });
     
     _loadStatus();
-    
+    _loadSeasonInfo();
+
     // WebSocket 연결 (알림 수신)
     _connectWebSocket();
     
@@ -140,6 +144,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
 // API 호출 함수들
+  Future<void> _loadSeasonInfo() async {
+    try {
+      final data = await _apiService.getSeasonInfo();
+      if (data['success'] == true && data['days_remaining'] != null) {
+        if (mounted) {
+          setState(() {
+            _seasonDaysRemaining = (data['days_remaining'] as num).toInt();
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadFCStatistics() async {
     if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
 
@@ -411,6 +428,30 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             const Icon(Icons.sports_soccer, size: 24),
             const SizedBox(width: 8),
             const Text('FC Online 4'),
+            if (_seasonDaysRemaining != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _seasonDaysRemaining! <= 0
+                      ? Colors.red[700]
+                      : _seasonDaysRemaining! <= 3
+                          ? Colors.red
+                          : Colors.white24,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _seasonDaysRemaining! <= 0
+                      ? '시즌종료'
+                      : '시즌종료 D-$_seasonDaysRemaining',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
         backgroundColor: const Color(0xFF1a237e),
@@ -733,9 +774,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   ),
               ],
             ),
-            // 최근 5경기 승무패 도트
+            // 최근 경기 승무패 도트 (20경기, 스와이프+기본버튼)
             Builder(builder: (context) {
-              // recent_results가 String 또는 Map({result, my_score, ...}) 두 형식 모두 처리
               final rawResults = account['recent_results'] ?? [];
               final recentResults = (rawResults as List).map<String>((r) {
                 if (r is String) return r;
@@ -745,7 +785,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               if (recentResults.isEmpty) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: _buildRecentGamesDots(recentResults),
+                child: _RecentGamesDots(results: recentResults),
               );
             }),
             const Divider(height: 24),
@@ -799,35 +839,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildRecentGamesDots(List<String> results) {
-    final wins = results.where((r) => r == 'WIN').length;
-    final draws = results.where((r) => r == 'DRAW').length;
-    final losses = results.where((r) => r == 'LOSE').length;
-    return Row(
-      children: [
-        ...results.map((r) {
-          final color = r == 'WIN'
-              ? const Color(0xFF2196F3)
-              : r == 'DRAW'
-                  ? const Color(0xFFFFC107)
-                  : const Color(0xFFF44336);
-          final symbol = r == 'DRAW' ? '▲' : '●';
-          return Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: Text(
-              symbol,
-              style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold),
-            ),
-          );
-        }),
-        const SizedBox(width: 6),
-        Text(
-          '$wins승 $draws무 $losses패',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
-        ),
-      ],
-    );
-  }
+  // _buildRecentGamesDots는 _RecentGamesDots StatefulWidget으로 대체됨
 
   Widget _buildControlSection(String username, bool isOnline, bool isRunning, String currentMode) {
     String selectedMode = 'coach';
@@ -3168,9 +3180,123 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 }
 
+/// 최근 경기 도트 위젯 — 최대 20개 표시, 좌우 스와이프로 이전 경기 조회, 기본 버튼으로 복귀
+class _RecentGamesDots extends StatefulWidget {
+  final List<String> results;
+  const _RecentGamesDots({required this.results});
 
+  @override
+  State<_RecentGamesDots> createState() => _RecentGamesDotsState();
+}
 
+class _RecentGamesDotsState extends State<_RecentGamesDots> {
+  int _offset = 0; // 0=최신 20경기, 20=그 이전 20경기...
+  static const int _page = 20;
 
+  List<String> get _view {
+    final total = widget.results.length;
+    final end = total - _offset;
+    final start = (end - _page).clamp(0, total);
+    return widget.results.sublist(start.clamp(0, total), end.clamp(0, total));
+  }
+
+  String get _summaryText {
+    final view = _view;
+    final wins = view.where((r) => r == 'WIN').length;
+    final draws = view.where((r) => r == 'DRAW').length;
+    final losses = view.where((r) => r == 'LOSE').length;
+    if (_offset == 0) return '$wins승 $draws무 $losses패';
+    final total = widget.results.length;
+    final rangeEnd = total - _offset;
+    final rangeStart = (rangeEnd - _page + 1).clamp(1, total);
+    return '$rangeStart~$rangeEnd번째 | $wins승 $draws무 $losses패';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.results.length;
+    final canPrev = (_offset + _page) < total;
+    final canNext = _offset > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            // ◀ 버튼
+            GestureDetector(
+              onTap: canPrev ? () => setState(() => _offset += _page) : null,
+              child: Text('◀',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: canPrev ? Colors.grey[600] : Colors.grey[300],
+                      fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 4),
+            // 도트 영역 (가로 스크롤)
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _view.map((r) {
+                    final color = r == 'WIN'
+                        ? const Color(0xFF2196F3)
+                        : r == 'DRAW'
+                            ? const Color(0xFFFFC107)
+                            : const Color(0xFFF44336);
+                    final symbol = r == 'DRAW' ? '▲' : '●';
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 3),
+                      child: Text(symbol,
+                          style: TextStyle(
+                              color: color,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold)),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            // ▶ 버튼
+            GestureDetector(
+              onTap: canNext ? () => setState(() => _offset = (_offset - _page).clamp(0, total)) : null,
+              child: Text('▶',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: canNext ? Colors.grey[600] : Colors.grey[300],
+                      fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 6),
+            // 기본 버튼
+            GestureDetector(
+              onTap: _offset > 0 ? () => setState(() => _offset = 0) : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                      color: _offset > 0 ? const Color(0xFF2196F3) : Colors.grey[400]!),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text('기본',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: _offset > 0 ? const Color(0xFF2196F3) : Colors.grey[400],
+                        fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        // 2행: 요약 텍스트
+        Text(
+          _summaryText,
+          style: TextStyle(fontSize: 11, color: Colors.grey[600], fontWeight: FontWeight.w500),
+        ),
+      ],
+    );
+  }
+}
 
 
 
