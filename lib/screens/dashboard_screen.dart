@@ -423,14 +423,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: const Row(
           children: [
-            const Icon(Icons.sports_soccer, size: 24),
-            const SizedBox(width: 8),
-            const Text('FC Online 4'),
-            if (_seasonDaysRemaining != null) ...[
-              const SizedBox(width: 8),
-              Container(
+            Icon(Icons.sports_soccer, size: 24),
+            SizedBox(width: 8),
+            Text('FC Online 4'),
+          ],
+        ),
+        backgroundColor: const Color(0xFF1a237e),
+        actions: [
+          if (_seasonDaysRemaining != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: _seasonDaysRemaining! <= 0
@@ -443,7 +448,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 child: Text(
                   _seasonDaysRemaining! <= 0
                       ? '시즌종료'
-                      : '시즌종료 D-$_seasonDaysRemaining',
+                      : 'D-$_seasonDaysRemaining',
                   style: const TextStyle(
                     fontSize: 11,
                     color: Colors.white,
@@ -451,11 +456,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   ),
                 ),
               ),
-            ],
-          ],
-        ),
-        backgroundColor: const Color(0xFF1a237e),
-        actions: [
+            ),
           IconButton(
             icon: Icon(
               Provider.of<ThemeProvider>(context).isDarkMode 
