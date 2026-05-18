@@ -3166,7 +3166,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 }
 
-/// 최근 경기 도트 위젯 — PageView 스와이프로 20개씩 탐색, 승무패 배지 표시
+/// 최근 경기 도트 위젯 — 자유 스크롤, 보이는 20개 기준 승무패 집계
 class _RecentGamesDots extends StatefulWidget {
   final List<String> results;
   const _RecentGamesDots({required this.results});
@@ -3176,48 +3176,57 @@ class _RecentGamesDots extends StatefulWidget {
 }
 
 class _RecentGamesDotsState extends State<_RecentGamesDots> {
-  late PageController _pageController;
-  int _currentPage = 0;
-  static const int _perPage = 20;
-
-  // 클라이언트와 동일: 왼쪽=오래된, 오른쪽=최신
-  // page 0 = 최신 20경기, page 1 = 그 이전 20경기, ...
-  int get _totalPages => (widget.results.length / _perPage).ceil();
-
-  List<String> _pageResults(int pageIndex) {
-    final total = widget.results.length;
-    final end = total - pageIndex * _perPage;
-    final start = (end - _perPage).clamp(0, total);
-    return widget.results.sublist(start, end.clamp(0, total));
-  }
+  final ScrollController _scrollController = ScrollController();
+  int _leftIndex = 0;   // 현재 보이는 가장 왼쪽 도트의 인덱스 (0=가장 오래된)
+  double _dotWidth = 14.0;
+  bool _scrollInitialized = false;
+  static const int _visibleCount = 20;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    // 최신 20개가 먼저 보이도록 초기 위치 설정
+    final total = widget.results.length;
+    _leftIndex = (total - _visibleCount).clamp(0, total);
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients || _dotWidth <= 0) return;
+    final total = widget.results.length;
+    final maxLeft = (total - _visibleCount).clamp(0, total);
+    final newLeft = (_scrollController.offset / _dotWidth).round().clamp(0, maxLeft);
+    if (newLeft != _leftIndex) {
+      setState(() => _leftIndex = newLeft);
+    }
   }
 
   @override
   void dispose() {
-    _pageController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.results.isEmpty) return const SizedBox.shrink();
+    final total = widget.results.length;
+    if (total == 0) return const SizedBox.shrink();
 
-    final pageResults = _pageResults(_currentPage);
-    final wins   = pageResults.where((r) => r == 'WIN').length;
-    final draws  = pageResults.where((r) => r == 'DRAW').length;
-    final losses = pageResults.where((r) => r == 'LOSE').length;
-    final canLeft  = _currentPage > 0;               // 최신 방향
-    final canRight = _currentPage < _totalPages - 1; // 과거 방향
+    final end = (_leftIndex + _visibleCount).clamp(0, total);
+    final visibleDots = widget.results.sublist(_leftIndex, end);
+    final wins   = visibleDots.where((r) => r == 'WIN').length;
+    final draws  = visibleDots.where((r) => r == 'DRAW').length;
+    final losses = visibleDots.where((r) => r == 'LOSE').length;
+    // 최신 기준 번호: 가장 오른쪽 도트가 1번째(최신)
+    final rangeEnd   = total - _leftIndex;
+    final rangeStart = (rangeEnd - visibleDots.length + 1).clamp(1, total);
+    final canLeft  = _leftIndex > 0;
+    final canRight = _leftIndex < total - _visibleCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 도트 영역
         Row(
           children: [
             Text('◀',
@@ -3229,34 +3238,69 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
             ),
             const SizedBox(width: 4),
             Expanded(
-              child: SizedBox(
-                height: 22,
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: _totalPages,
-                  onPageChanged: (page) => setState(() => _currentPage = page),
-                  itemBuilder: (context, pageIndex) {
-                    final dots = _pageResults(pageIndex);
-                    return Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: dots.map((r) {
-                        final color = r == 'WIN'
-                            ? const Color(0xFF2196F3)
-                            : r == 'DRAW'
-                                ? const Color(0xFFFFC107)
-                                : const Color(0xFFF44336);
-                        return Text(
-                          r == 'DRAW' ? '▲' : '●',
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  _dotWidth = constraints.maxWidth / _visibleCount;
+                  // 첫 렌더링 시 최신 위치로 스크롤 이동
+                  if (!_scrollInitialized && total > _visibleCount) {
+                    _scrollInitialized = true;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (_scrollController.hasClients) {
+                        _scrollController.jumpTo(
+                          (_leftIndex * _dotWidth).clamp(
+                            0.0, _scrollController.position.maxScrollExtent,
                           ),
                         );
-                      }).toList(),
-                    );
-                  },
-                ),
+                      }
+                    });
+                  }
+                  return SizedBox(
+                    height: 22,
+                    child: NotificationListener<ScrollEndNotification>(
+                      // 스크롤 끝나면 도트 경계에 스냅
+                      onNotification: (_) {
+                        if (_scrollController.hasClients) {
+                          final snapped = (_leftIndex * _dotWidth).clamp(
+                            0.0, _scrollController.position.maxScrollExtent,
+                          );
+                          if ((_scrollController.offset - snapped).abs() > 0.5) {
+                            _scrollController.animateTo(
+                              snapped,
+                              duration: const Duration(milliseconds: 80),
+                              curve: Curves.easeOut,
+                            );
+                          }
+                        }
+                        return false;
+                      },
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        scrollDirection: Axis.horizontal,
+                        itemCount: total,
+                        itemExtent: _dotWidth,
+                        physics: const BouncingScrollPhysics(),
+                        itemBuilder: (context, index) {
+                          final r = widget.results[index];
+                          final color = r == 'WIN'
+                              ? const Color(0xFF2196F3)
+                              : r == 'DRAW'
+                                  ? const Color(0xFFFFC107)
+                                  : const Color(0xFFF44336);
+                          return Center(
+                            child: Text(
+                              r == 'DRAW' ? '▲' : '●',
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
             const SizedBox(width: 4),
@@ -3269,15 +3313,19 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        // 승무패 배지 (가운데 정렬)
+        const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            Text(
+              '최근 $rangeStart~$rangeEnd번째',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
+            const SizedBox(width: 8),
             _badge('${wins}승', const Color(0xFF2196F3)),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             _badge('${draws}무', const Color(0xFFFFC107)),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             _badge('${losses}패', const Color(0xFFF44336)),
           ],
         ),
