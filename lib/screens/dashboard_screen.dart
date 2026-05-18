@@ -1183,19 +1183,20 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // FC 채굴량 차트
-          _buildFCMiningChart(),
-          const SizedBox(height: 24),
-          
-          // 순위/점수 차트
-          _buildRankScoreChart(),
-          const SizedBox(height: 24),
-          
-          // 경기수 차트
-          _buildMatchCountChart(),
-        ],
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // FC 채굴량 차트
+            _buildFCMiningChart(),
+            const SizedBox(height: 24),
+
+            // 순위/점수 차트
+            _buildRankScoreChart(),
+            const SizedBox(height: 24),
+
+            // 경기수 차트
+            _buildMatchCountChart(),
+          ],
+        ),
       ),
     );
   }
