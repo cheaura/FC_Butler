@@ -470,30 +470,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             tooltip: '다크모드 전환',
           ),
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              // 현재 탭에 따라 적절한 새로고침 실행
-              if (_tabController.index == 0) {
-                _loadStatus();
-              } else if (_tabController.index == 1) {
-                _loadFCStatistics();
-                _loadRankScoreStatistics();
-                _loadMatchCountStatistics();
-              } else if (_tabController.index == 2) {
-                _loadMatchHistory();
-              } else if (_tabController.index == 3) {
-                _loadRankingData();
-              }
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('새로고침 완료'),
-                  duration: Duration(seconds: 1),
-                ),
-              );
-            },
-            tooltip: '새로고침',
-          ),
-          IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {
               Navigator.push(
@@ -1197,9 +1173,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       return const Center(child: CircularProgressIndicator());
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+    return RefreshIndicator(
+      onRefresh: () async {
+        _loadFCStatistics();
+        _loadRankScoreStatistics();
+        _loadMatchCountStatistics();
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // FC 채굴량 차트
@@ -2253,7 +2236,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         ),
       ),
     );
-  }
+  }  // _buildStatisticsTab 끝
 
   Widget _buildMatchHistoryTab() {
     return RefreshIndicator(
