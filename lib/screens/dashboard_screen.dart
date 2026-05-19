@@ -80,6 +80,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   // 시즌 D-day
   int? _seasonDaysRemaining;
 
+  // 탭별 최초 로드 여부 (탭 전환 시 중복 로드 방지)
+  bool _statisticsLoaded = false;
+  bool _matchHistoryLoaded = false;
+  bool _rankingLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -92,18 +97,25 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       if (_tabController.indexIsChanging) return; // 탭 전환 애니메이션 중 중복 발화 방지
       setState(() {}); // AppBar 조건부 버튼 업데이트
       if (_tabController.index == 1 && _selectedAccount != null && _selectedAccount!.isNotEmpty) {
-        // 통계 탭으로 전환 시 데이터 로드 (이미 로딩 중이면 중복 방지)
-        if (!_statisticsLoading) {
+        // 통계 탭: 최초 1회만 로드 (이후 스와이프로 갱신)
+        if (!_statisticsLoaded && !_statisticsLoading) {
+          _statisticsLoaded = true;
           _loadFCStatistics();
           _loadRankScoreStatistics();
           _loadMatchCountStatistics();
         }
       } else if (_tabController.index == 2 && _selectedAccount != null && _selectedAccount!.isNotEmpty) {
-        // 전적 탭으로 전환 시 데이터 로드
-        _loadMatchHistory();
+        // 전적 탭: 최초 1회만 로드 (이후 스와이프로 갱신)
+        if (!_matchHistoryLoaded) {
+          _matchHistoryLoaded = true;
+          _loadMatchHistory();
+        }
       } else if (_tabController.index == 3) {
-        // 랭킹 탭으로 전환 시 데이터 로드
-        _loadRankingData();
+        // 랭킹 탭: 최초 1회만 로드 (이후 스와이프로 갱신)
+        if (!_rankingLoaded) {
+          _rankingLoaded = true;
+          _loadRankingData();
+        }
       }
     });
     
