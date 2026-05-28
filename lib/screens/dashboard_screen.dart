@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
 import '../providers/theme_provider.dart';
@@ -611,6 +612,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final isPenaltyKick = ingameTime == '승부차기중';
     final isPlaying = ingameTime != null && !isMatching && !isPenaltyKick;
 
+    // 상대방 정보 (combined 화면)
+    final opponentManagerImg = account['opponent_manager_img'] as String?;
+    final opponentScore = account['opponent_score'];
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 4,
@@ -668,6 +673,48 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             ),
             const SizedBox(height: 16),
             // 인게임 상태 배너 (경기 중 / 승부차기 중 / 매칭대기중)
+            // 상대방 감독명·점수 (combined 화면 감지 시 표시)
+            if (opponentManagerImg != null) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: const Border(
+                    left: BorderSide(color: Color(0xFFADB5BD), width: 4),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Builder(
+                      builder: (_) {
+                        try {
+                          return Image.memory(
+                            base64Decode(opponentManagerImg),
+                            height: 18,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                          );
+                        } catch (_) {
+                          return const SizedBox.shrink();
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'vs ${opponentScore ?? '-'}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (ingameTime != null) ...[
               Container(
                 margin: const EdgeInsets.only(bottom: 12),
