@@ -687,6 +687,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 ),
                 child: Row(
                   children: [
+                    const Text(
+                      'vs',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFf39c12),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Builder(
                       builder: (_) {
                         try {
@@ -704,7 +713,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'vs ${opponentScore ?? '-'}',
+                      '${opponentScore ?? '-'}점',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
