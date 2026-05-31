@@ -706,9 +706,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     Text(
                       'vs ${opponentScore ?? '-'}',
                       style: const TextStyle(
-                        fontSize: 11,
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF666666),
+                        color: Color(0xFFf39c12),
                       ),
                     ),
                   ],
