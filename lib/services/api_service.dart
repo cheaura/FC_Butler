@@ -373,6 +373,123 @@ class ApiService {
   // ===== 랭킹/컷라인 조회 API 제거됨 =====
   // Flutter 앱에서 직접 Nexon 웹페이지 크롤링하도록 변경
 
+  // ===== 이적시장 거래기록 (2026-07-14, 웹 대시보드와 동일 API) =====
+
+  // 공통 GET 헬퍼
+  Future<Map<String, dynamic>> _authGet(String path, {int timeoutSec = 20}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl$path'),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(Duration(seconds: timeoutSec));
+      return json.decode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'error': '서버 연결 오류'};
+    }
+  }
+
+  // 넥슨 API 키 등록 상태
+  Future<Map<String, dynamic>> getNexonKeyStatus(String username) async {
+    return _authGet('/api/user/nexon-key/status?username=${Uri.encodeComponent(username)}');
+  }
+
+  // 넥슨 API 키 등록
+  Future<Map<String, dynamic>> registerNexonKey(String username, String apiKey) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/nexon-key'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'username': username, 'api_key': apiKey}),
+      ).timeout(const Duration(seconds: 20));
+      return json.decode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'error': '서버 연결 오류'};
+    }
+  }
+
+  // 넥슨 API 키 삭제
+  Future<Map<String, dynamic>> deleteNexonKey(String username) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/api/user/nexon-key?username=${Uri.encodeComponent(username)}'),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 15));
+      return json.decode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'error': '서버 연결 오류'};
+    }
+  }
+
+  // 거래내역 조회 (type: buy/sell/all, 페이지네이션)
+  Future<Map<String, dynamic>> getTradeHistory({
+    required String username,
+    String type = 'all',
+    String player = '',
+    String season = '',
+    int offset = 0,
+    int limit = 30,
+  }) async {
+    final params = <String, String>{
+      'username': username,
+      'type': type,
+      'offset': '$offset',
+      'limit': '$limit',
+      if (player.isNotEmpty) 'player': player,
+      if (season.isNotEmpty) 'season': season,
+    };
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+        .join('&');
+    return _authGet('/api/user/market/trade-history?$query', timeoutSec: 30);
+  }
+
+  // 내 스쿼드 손익
+  Future<Map<String, dynamic>> getSquadPnl(String username) async {
+    return _authGet(
+        '/api/user/market/squad-pnl?username=${Uri.encodeComponent(username)}&mode=manager_mode',
+        timeoutSec: 30);
+  }
+
+  // ===== 전적 분석 리포트 (2026-07-14, 웹 대시보드와 동일 API) =====
+
+  // 분석 시작 (캐시 적중 시 status='done' + result 즉시 반환)
+  Future<Map<String, dynamic>> startMatchAnalysis(
+      String username, Map<String, dynamic> scope) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/match-analysis/start'),
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'username': username, 'scope': scope}),
+      ).timeout(const Duration(seconds: 20));
+      return json.decode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      return {'success': false, 'error': '서버 연결 오류'};
+    }
+  }
+
+  // 분석 상태 폴링
+  Future<Map<String, dynamic>> getAnalysisStatus(String jobId) async {
+    return _authGet('/api/user/match-analysis/status?job_id=$jobId', timeoutSec: 10);
+  }
+
+  // 분석 결과
+  Future<Map<String, dynamic>> getAnalysisResult(String jobId) async {
+    return _authGet('/api/user/match-analysis/result?job_id=$jobId', timeoutSec: 20);
+  }
+
+  // 최근 분석 결과 (지난 분석 열기)
+  Future<Map<String, dynamic>> getLatestAnalysis(String username) async {
+    return _authGet(
+        '/api/user/match-analysis/latest?username=${Uri.encodeComponent(username)}',
+        timeoutSec: 15);
+  }
+
   // 시즌 D-day 조회
   Future<Map<String, dynamic>> getSeasonInfo() async {
     try {

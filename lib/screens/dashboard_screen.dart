@@ -12,6 +12,8 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
 import 'login_screen.dart';
 import 'notifications_screen.dart';
+import 'market_tab.dart';
+import 'analysis_tab.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -91,7 +93,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _selectedAccount = widget.username;
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     
     // 탭 전환 리스너 추가
     _tabController.addListener(() {
@@ -511,6 +513,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,  // 6탭 — 좁은 화면에서 좌우 스크롤
           labelColor: Colors.white,  // ✅ 다크/라이트 모두 흰색으로 통일
           unselectedLabelColor: Theme.of(context).brightness == Brightness.dark
               ? Colors.white60
@@ -521,6 +524,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             Tab(icon: Icon(Icons.bar_chart), text: '통계'),
             Tab(icon: Icon(Icons.list), text: '전적'),
             Tab(icon: Icon(Icons.emoji_events), text: '랭킹'),
+            Tab(icon: Icon(Icons.storefront), text: '이적시장'),
+            Tab(icon: Icon(Icons.pie_chart), text: '전적분석'),
           ],
         ),
       ),
@@ -531,6 +536,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           _buildStatisticsTab(),
           _buildMatchHistoryTab(),
           _buildRankingTab(),
+          // 계정 전환 시 상태가 초기화되도록 계정명을 key로 사용
+          MarketTab(key: ValueKey('market-$_selectedAccount'), username: _selectedAccount),
+          AnalysisTab(key: ValueKey('analysis-$_selectedAccount'), username: _selectedAccount),
         ],
       ),
     );

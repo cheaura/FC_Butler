@@ -51,3 +51,10 @@ dd-fconline4-firebase-adminsdk-*.json
 
 # Workspace files
 *.code-workspace
+
+# 민감 파일 — 절대 커밋 금지 (2026-07-14)
+AuthKey_*.p8
+github_token.txt
+MacinCloud_*
+MacinCloud_*/
+*.backup_*
