@@ -373,6 +373,11 @@ class ApiService {
   // ===== 랭킹/컷라인 조회 API 제거됨 =====
   // Flutter 앱에서 직접 Nexon 웹페이지 크롤링하도록 변경
 
+  // 연동 계정 목록 (탭 내 계정 선택기용)
+  Future<Map<String, dynamic>> getLinkedAccounts() async {
+    return _authGet('/api/user/linked-accounts/list', timeoutSec: 10);
+  }
+
   // ===== 이적시장 거래기록 (2026-07-14, 웹 대시보드와 동일 API) =====
 
   // 공통 GET 헬퍼

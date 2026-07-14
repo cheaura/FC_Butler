@@ -15,6 +15,10 @@ class MarketTab extends StatefulWidget {
 class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixin {
   final ApiService _api = ApiService();
 
+  // 계정 선택 (본계정 + 연동계정 — 웹 이적시장 섹션과 동일 방식)
+  late String _account;
+  List<String> _linkedAccounts = [];
+
   // 키 상태
   bool _keyChecked = false;
   bool _keyRegistered = false;
@@ -42,7 +46,64 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
   @override
   void initState() {
     super.initState();
+    _account = widget.username;
+    _loadLinkedAccounts();
     _checkKey();
+  }
+
+  Future<void> _loadLinkedAccounts() async {
+    final res = await _api.getLinkedAccounts();
+    if (!mounted) return;
+    if (res['success'] == true) {
+      setState(() {
+        _linkedAccounts = List<Map<String, dynamic>>.from(res['linked_accounts'] ?? [])
+            .map((a) => a['username'].toString())
+            .where((u) => u != widget.username)
+            .toList();
+      });
+    }
+  }
+
+  void _onAccountChanged(String account) {
+    setState(() {
+      _account = account;
+      // 계정 전환 → 상태 전체 초기화 후 다시 로드
+      _keyChecked = false;
+      _keyRegistered = false;
+      _items = [];
+      _total = 0;
+      _note = null;
+      _realized = null;
+      _pnl = null;
+    });
+    _checkKey();
+  }
+
+  Widget _buildAccountSelector() {
+    return Row(
+      children: [
+        const Icon(Icons.person, size: 16),
+        const SizedBox(width: 6),
+        const Text('계정', style: TextStyle(fontSize: 13)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: DropdownButton<String>(
+            value: _account,
+            isDense: true,
+            isExpanded: true,
+            style: TextStyle(fontSize: 13, color: Theme.of(context).textTheme.bodyMedium?.color),
+            items: [
+              DropdownMenuItem(value: widget.username, child: Text(widget.username)),
+              ..._linkedAccounts.map((u) =>
+                  DropdownMenuItem(value: u, child: Text('$u (연동계정)'))),
+            ],
+            onChanged: (v) {
+              if (v != null && v != _account) _onAccountChanged(v);
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -53,7 +114,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
   }
 
   Future<void> _checkKey() async {
-    final res = await _api.getNexonKeyStatus(widget.username);
+    final res = await _api.getNexonKeyStatus(_account);
     if (!mounted) return;
     setState(() {
       _keyChecked = true;
@@ -69,7 +130,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
     final key = _keyController.text.trim();
     if (key.isEmpty) return;
     setState(() => _keySaving = true);
-    final res = await _api.registerNexonKey(widget.username, key);
+    final res = await _api.registerNexonKey(_account, key);
     if (!mounted) return;
     setState(() => _keySaving = false);
     final msg = res['message']?.toString() ?? res['error']?.toString() ?? '';
@@ -93,7 +154,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
       ),
     );
     if (ok != true) return;
-    await _api.deleteNexonKey(widget.username);
+    await _api.deleteNexonKey(_account);
     if (!mounted) return;
     setState(() {
       _keyRegistered = false;
@@ -116,7 +177,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
       }
     });
     final res = await _api.getTradeHistory(
-      username: widget.username,
+      username: _account,
       type: _tradeType,
       player: _playerController.text.trim(),
       offset: reset ? 0 : _items.length,
@@ -141,7 +202,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
 
   Future<void> _loadPnl() async {
     setState(() => _pnlLoading = true);
-    final res = await _api.getSquadPnl(widget.username);
+    final res = await _api.getSquadPnl(_account);
     if (!mounted) return;
     setState(() {
       _pnlLoading = false;
@@ -163,6 +224,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
+          _buildAccountSelector(),
           _buildKeyStatusRow(),
           const SizedBox(height: 8),
           _buildFilterRow(),
@@ -207,6 +269,8 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        _buildAccountSelector(),
+        const SizedBox(height: 8),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),

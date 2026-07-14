@@ -514,6 +514,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,  // 6탭 — 좁은 화면에서 좌우 스크롤
+          tabAlignment: TabAlignment.start,  // 기본 startOffset의 좌측 여백 제거
           labelColor: Colors.white,  // ✅ 다크/라이트 모두 흰색으로 통일
           unselectedLabelColor: Theme.of(context).brightness == Brightness.dark
               ? Colors.white60

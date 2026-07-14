@@ -16,6 +16,10 @@ class AnalysisTab extends StatefulWidget {
 class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClientMixin {
   final ApiService _api = ApiService();
 
+  // 계정 선택 (본계정 + 연동계정 — 웹 전적분석 섹션과 동일 방식)
+  late String _account;
+  List<String> _linkedAccounts = [];
+
   // 범위 선택
   String _scopeType = 'count'; // count | period
   int _count = 100;
@@ -40,7 +44,62 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   @override
   void initState() {
     super.initState();
+    _account = widget.username;
+    _loadLinkedAccounts();
     _loadLatest();
+  }
+
+  Future<void> _loadLinkedAccounts() async {
+    final res = await _api.getLinkedAccounts();
+    if (!mounted) return;
+    if (res['success'] == true) {
+      setState(() {
+        _linkedAccounts = List<Map<String, dynamic>>.from(res['linked_accounts'] ?? [])
+            .map((a) => a['username'].toString())
+            .where((u) => u != widget.username)
+            .toList();
+      });
+    }
+  }
+
+  void _onAccountChanged(String account) {
+    _pollTimer?.cancel();
+    setState(() {
+      _account = account;
+      // 계정 전환 → 결과·상태 초기화
+      _running = false;
+      _result = null;
+      _error = null;
+      _latest = null;
+    });
+    _loadLatest();
+  }
+
+  Widget _buildAccountSelector() {
+    return Row(
+      children: [
+        const Icon(Icons.person, size: 16),
+        const SizedBox(width: 6),
+        const Text('계정', style: TextStyle(fontSize: 13)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: DropdownButton<String>(
+            value: _account,
+            isDense: true,
+            isExpanded: true,
+            style: TextStyle(fontSize: 13, color: Theme.of(context).textTheme.bodyMedium?.color),
+            items: [
+              DropdownMenuItem(value: widget.username, child: Text(widget.username)),
+              ..._linkedAccounts.map((u) =>
+                  DropdownMenuItem(value: u, child: Text('$u (연동계정)'))),
+            ],
+            onChanged: (v) {
+              if (v != null && v != _account) _onAccountChanged(v);
+            },
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -50,7 +109,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   }
 
   Future<void> _loadLatest() async {
-    final res = await _api.getLatestAnalysis(widget.username);
+    final res = await _api.getLatestAnalysis(_account);
     if (!mounted) return;
     if (res['success'] == true && res['exists'] == true) {
       setState(() => _latest = res);
@@ -72,7 +131,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
       _result = null;
       _error = null;
     });
-    final res = await _api.startMatchAnalysis(widget.username, _currentScope());
+    final res = await _api.startMatchAnalysis(_account, _currentScope());
     if (!mounted) return;
     if (res['success'] != true) {
       setState(() {
@@ -182,6 +241,8 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildAccountSelector(),
+            const SizedBox(height: 4),
             Row(children: [
               for (final t in const [
                 ['count', '경기 수'],
