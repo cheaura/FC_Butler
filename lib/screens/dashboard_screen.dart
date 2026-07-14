@@ -1245,6 +1245,49 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
+  // 통계·전적 탭 공용 계정 선택기 (본계정+연동계정 — 연동계정 없으면 숨김)
+  Widget _buildAccountDropdown() {
+    final usernames = _accounts.map((a) => a['username'].toString()).toSet().toList();
+    if (_selectedAccount.isNotEmpty && !usernames.contains(_selectedAccount)) {
+      usernames.insert(0, _selectedAccount);
+    }
+    if (usernames.length <= 1) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          const Icon(Icons.person, size: 16),
+          const SizedBox(width: 6),
+          const Text('계정', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButton<String>(
+              value: _selectedAccount,
+              isDense: true,
+              isExpanded: true,
+              style: TextStyle(fontSize: 13, color: Theme.of(context).textTheme.bodyMedium?.color),
+              items: usernames
+                  .map((u) => DropdownMenuItem(
+                        value: u,
+                        child: Text(u == widget.username ? u : '$u (연동계정)'),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null || v == _selectedAccount) return;
+                setState(() => _selectedAccount = v);
+                // 통계·전적 모두 선택 계정으로 재조회
+                _loadFCStatistics();
+                _loadRankScoreStatistics();
+                _loadMatchCountStatistics();
+                _loadMatchHistory();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatisticsTab() {
     if (_statisticsLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -1262,6 +1305,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildAccountDropdown(),
             // FC 채굴량 차트
             _buildFCMiningChart(),
             const SizedBox(height: 24),
@@ -2326,6 +2370,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildAccountDropdown(),
               // 모드 필터
               const Text('모드', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),

@@ -23,6 +23,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   // 범위 선택
   String _scopeType = 'count'; // count | period
   int _count = 100;
+  final TextEditingController _customCountController = TextEditingController();
   DateTime _dateFrom = DateTime.now().subtract(const Duration(days: 7));
   DateTime _dateTo = DateTime.now();
 
@@ -105,6 +106,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _customCountController.dispose();
     super.dispose();
   }
 
@@ -117,7 +119,14 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   }
 
   Map<String, dynamic> _currentScope() {
-    if (_scopeType == 'count') return {'type': 'count', 'count': _count};
+    if (_scopeType == 'count') {
+      // 직접 입력이 있으면 프리셋보다 우선 (10~3000 범위 보정)
+      final custom = int.tryParse(_customCountController.text.trim());
+      if (custom != null && custom > 0) {
+        return {'type': 'count', 'count': custom.clamp(10, 3000)};
+      }
+      return {'type': 'count', 'count': _count};
+    }
     String fmt(DateTime d) =>
         '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     return {'type': 'period', 'from': fmt(_dateFrom), 'to': fmt(_dateTo)};
@@ -259,16 +268,40 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
             ]),
             const SizedBox(height: 6),
             if (_scopeType == 'count')
-              Wrap(
-                spacing: 6,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final c in const [50, 100, 300, 500, 1000, 3000])
-                    ChoiceChip(
-                      label: Text(c == 3000 ? '전체(최대 3000)' : '$c',
-                          style: const TextStyle(fontSize: 12)),
-                      selected: _count == c,
-                      onSelected: (_) => setState(() => _count = c),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      for (final c in const [50, 100, 300, 500, 1000, 2000, 3000])
+                        ChoiceChip(
+                          label: Text(c == 3000 ? '전체(최대 3000)' : '$c',
+                              style: const TextStyle(fontSize: 12)),
+                          selected: _count == c && _customCountController.text.trim().isEmpty,
+                          onSelected: (_) => setState(() {
+                            _count = c;
+                            _customCountController.clear();
+                          }),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: 170,
+                    child: TextField(
+                      controller: _customCountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        hintText: '직접 입력 (10~3000)',
+                        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                      onChanged: (_) => setState(() {}),
                     ),
+                  ),
                 ],
               )
             else
