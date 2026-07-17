@@ -400,17 +400,42 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
   }
 
-  Future<void> _startMacro(String username, String mode, bool clubDonation, Map<String, dynamic>? parkingConditions) async {
+  Future<void> _startMacro(String username, String mode, bool clubDonation,
+      Map<String, dynamic>? parkingConditions,
+      {String? leagueSub, bool? bgMode}) async {
     final result = await widget.apiService.startMacro(
-      username, 
+      username,
       mode,
       clubDonation: clubDonation,
       parkingConditions: parkingConditions,
+      leagueSub: leagueSub,
+      bgMode: bgMode,
     );
-    
+
     if (result['success']) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: Colors.green),
+      );
+      await _loadStatus();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오류: ${result['message']}'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // 원격 제어 공통 헬퍼 (2026-07-18 원격 제어 확장) — 명령 전송 + 결과 스낵바 + 상태 갱신
+  Future<void> _sendControl(String username,
+      Future<Map<String, dynamic>> request, String okMsg,
+      {Color color = Colors.green}) async {
+    final result = await request;
+    if (!mounted) return;
+    if (result['success'] == true) {
+      final msg = (result['message'] is String && (result['message'] as String).isNotEmpty)
+          ? result['message'] as String
+          : okMsg;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$username: $msg'), backgroundColor: color),
       );
       await _loadStatus();
     } else {
@@ -443,7 +468,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           children: [
             Icon(Icons.sports_soccer, size: 24),
             SizedBox(width: 8),
-            Text('FC Online 4'),
+            // 좁은 화면·큰 글꼴에서 가로 넘침(OVERFLOWED 경고) 방지 — 넘치면 말줄임
+            Flexible(
+              child: Text('FC Online 4',
+                  overflow: TextOverflow.ellipsis, softWrap: false, maxLines: 1),
+            ),
           ],
         ),
         backgroundColor: const Color(0xFF1a237e),
@@ -844,7 +873,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               );
             }),
             const Divider(height: 24),
-            _buildControlSection(username, isOnline, isRunning, mode),
+            _buildControlSection(username, isOnline, isRunning, mode,
+                account['control_state'] is Map<String, dynamic>
+                    ? account['control_state'] as Map<String, dynamic>
+                    : null),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -896,11 +928,169 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   // _buildRecentGamesDots는 _RecentGamesDots StatefulWidget으로 대체됨
 
-  Widget _buildControlSection(String username, bool isOnline, bool isRunning, String currentMode) {
+  // ── 예약 정지 (경기 수 / 시각 지정) — 2026-07-18 원격 제어 확장 ──
+  Widget _buildReserveStopTile(String username, Map<String, dynamic> cs) {
+    final reserve = cs['reserve_stop'] is Map ? cs['reserve_stop'] as Map : null;
+    final reserveTime = cs['reserve_stop_time'] is Map ? cs['reserve_stop_time'] as Map : null;
+    int? gamesValue;
+    bool shutdown = false;
+    TimeOfDay? pickedTime;
+    bool timeShutdown = false;
+
+    final parts = <String>[];
+    if (reserve != null) {
+      parts.add('${reserve['games']}경기 후${reserve['shutdown'] == true ? '+PC종료' : ''}');
+    }
+    if (reserveTime != null) parts.add('${reserveTime['time']} 정지');
+    final summary = parts.isEmpty ? '예약 정지' : '예약 정지: ${parts.join(' · ')}';
+
+    return StatefulBuilder(builder: (context, setState) {
+      return Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text(summary,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold,
+                  color: parts.isNotEmpty ? Colors.orange[700] : null)),
+          children: [
+            // 경기 수 예약 (N경기 후 정지 +PC종료 옵션)
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(
+                      labelText: '경기 수', border: OutlineInputBorder(), isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+                  keyboardType: TextInputType.number,
+                  onChanged: (v) => gamesValue = int.tryParse(v),
+                ),
+              ),
+              Checkbox(value: shutdown, onChanged: (v) => setState(() => shutdown = v!)),
+              const Text('PC종료', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+              ElevatedButton(
+                onPressed: () {
+                  if (gamesValue == null || gamesValue! < 1 || gamesValue! > 999) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('경기 수는 1~999 사이로 입력하세요.'),
+                        backgroundColor: Colors.orange));
+                    return;
+                  }
+                  _sendControl(username,
+                      widget.apiService.reserveStop(username, gamesValue!, shutdown),
+                      '예약 정지 전송됨');
+                },
+                child: const Text('예약', style: TextStyle(fontSize: 12)),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            // 시각 지정 예약 (HH:MM에 정지 +PC종료 옵션)
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    final t = await showTimePicker(
+                        context: context, initialTime: TimeOfDay.now());
+                    if (t != null) setState(() => pickedTime = t);
+                  },
+                  child: Text(
+                      pickedTime == null
+                          ? '정지 시각 선택'
+                          : '${pickedTime!.hour.toString().padLeft(2, '0')}:${pickedTime!.minute.toString().padLeft(2, '0')} 에 정지',
+                      style: const TextStyle(fontSize: 12)),
+                ),
+              ),
+              Checkbox(value: timeShutdown, onChanged: (v) => setState(() => timeShutdown = v!)),
+              const Text('PC종료', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 4),
+              ElevatedButton(
+                onPressed: () {
+                  if (pickedTime == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('정지 시각을 먼저 선택하세요.'),
+                        backgroundColor: Colors.orange));
+                    return;
+                  }
+                  _sendControl(username,
+                      widget.apiService.reserveStopTime(
+                          username, pickedTime!.hour, pickedTime!.minute, timeShutdown),
+                      '시간 예약 전송됨');
+                },
+                child: const Text('예약', style: TextStyle(fontSize: 12)),
+              ),
+            ]),
+            if (reserve != null || reserveTime != null)
+              Row(children: [
+                if (reserve != null)
+                  TextButton(
+                      onPressed: () => _sendControl(username,
+                          widget.apiService.cancelReserveStop(username),
+                          '경기 수 예약 취소 전송됨', color: Colors.orange),
+                      child: const Text('경기 수 예약 취소',
+                          style: TextStyle(fontSize: 12, color: Colors.red))),
+                if (reserveTime != null)
+                  TextButton(
+                      onPressed: () => _sendControl(username,
+                          widget.apiService.cancelReserveStopTime(username),
+                          '시간 예약 취소 전송됨', color: Colors.orange),
+                      child: const Text('시간 예약 취소',
+                          style: TextStyle(fontSize: 12, color: Colors.red))),
+              ]),
+          ],
+        ),
+      );
+    });
+  }
+
+  // ── PC 설정 원격 토글 (자동재시작·전술류) — 2026-07-18 원격 제어 확장 ──
+  Widget _buildRemoteTogglesTile(String username, Map<String, dynamic> cs, bool isRunning) {
+    final toggles = cs['toggles'] is Map
+        ? Map<String, dynamic>.from(cs['toggles'] as Map)
+        : <String, dynamic>{};
+    final autoRestart = cs['auto_restart'] == true;
+
+    Widget row(String label, String key, bool value, {bool isAutoRestart = false}) {
+      return SwitchListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        title: Text(label, style: const TextStyle(fontSize: 13)),
+        value: value,
+        onChanged: (v) => _sendControl(
+          username,
+          isAutoRestart
+              ? widget.apiService.setAutoRestart(username, v)
+              : widget.apiService.setToggles(username, {key: v}),
+          '$label ${v ? '켬' : '끔'} 전송됨',
+        ),
+      );
+    }
+
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: Text(
+            'PC 설정 제어${isRunning ? ' (전술류는 다음 시작부터 적용)' : ''}',
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+        children: [
+          row('자동재시작', 'auto_restart', autoRestart, isAutoRestart: true),
+          row('격앙모드', 'rage_mode', toggles['rage_mode'] == true),
+          row('옵사트랩', 'offside_trap', toggles['offside_trap'] == true),
+          row('팀압박', 'team_press', toggles['team_press'] == true),
+          row('강등방어', 'relegation_defense', toggles['relegation_defense'] == true),
+          row('클럽기부', 'club_donation', toggles['club_donation'] == true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlSection(String username, bool isOnline, bool isRunning,
+      String currentMode, Map<String, dynamic>? controlState) {
     String selectedMode = 'coach';
     bool clubDonation = false;
     bool showParkingConditions = false;
-    
+    String leagueSub = 'manager';   // 리그모드 서브모드 (감독전/AI전)
+    String runModeChoice = 'keep';  // 실행 방식: keep=PC 설정 유지 / normal / bg
+
     // 주차모드 조건 상태
     bool tierEnabled = false;
     String selectedTier = '슈퍼챔피언스감독';
@@ -911,26 +1101,86 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     int? scoreValue;
     String scoreCondition = '이상';
 
+    // 원격 제어 확장 지원 여부 (구버전 클라이언트는 control_state 미전송 → 기존 UI만)
+    final supports = (controlState?['supports'] is List)
+        ? List<String>.from(controlState!['supports'] as List)
+        : <String>[];
+    final isPaused = controlState?['paused'] == true;
+
     return StatefulBuilder(
       builder: (context, setState) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (isRunning) ...[
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _stopMacro(username),
-                  icon: const Icon(Icons.stop),
-                  label: const Text('중지'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
+              if (supports.contains('pause')) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _sendControl(
+                          username,
+                          isPaused
+                              ? widget.apiService.resumeMacro(username)
+                              : widget.apiService.pauseMacro(username),
+                          isPaused ? '재개 명령 전송됨' : '일시정지 명령 전송됨',
+                          color: Colors.orange,
+                        ),
+                        icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+                        label: Text(isPaused ? '재개' : '일시정지'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _stopMacro(username),
+                        icon: const Icon(Icons.stop),
+                        label: const Text('중지'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _stopMacro(username),
+                    icon: const Icon(Icons.stop),
+                    label: const Text('중지'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                 ),
-              ),
+              ],
+              if (isPaused)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.pause_circle, size: 14, color: Colors.orange),
+                      const SizedBox(width: 4),
+                      Text('일시정지 중',
+                          style: TextStyle(fontSize: 12, color: Colors.orange[700],
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 8),
+              if (supports.contains('reserve_stop'))
+                _buildReserveStopTile(username, controlState!),
             ],
+            if (isOnline && supports.contains('set_toggles'))
+              _buildRemoteTogglesTile(username, controlState!, isRunning),
             if (!isRunning && isOnline) ...[
               Row(
                 children: [
@@ -1000,7 +1250,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           }
                         }
                         
-                        _startMacro(username, selectedMode, clubDonation, parkingConditions);
+                        _startMacro(username, selectedMode, clubDonation, parkingConditions,
+                            leagueSub: selectedMode == 'league' ? leagueSub : null,
+                            bgMode: runModeChoice == 'keep' ? null : runModeChoice == 'bg');
                       },
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('시작'),
@@ -1014,7 +1266,51 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 ],
               ),
               const SizedBox(height: 8),
-              
+
+              // 서브모드(리그) + 실행 방식 — 신버전 클라(control_state 있음)에서만 표시
+              if (supports.contains('league_sub') || supports.contains('bg_mode'))
+                Row(
+                  children: [
+                    if (selectedMode == 'league' && supports.contains('league_sub')) ...[
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: leagueSub,
+                          decoration: const InputDecoration(
+                            labelText: '서브모드',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'manager', child: Text(' 감독전', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'ai', child: Text(' AI전', style: TextStyle(fontSize: 13))),
+                          ],
+                          onChanged: (value) => setState(() => leagueSub = value!),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (supports.contains('bg_mode'))
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: runModeChoice,
+                          decoration: const InputDecoration(
+                            labelText: '실행 방식',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'keep', child: Text(' PC 설정 유지', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'normal', child: Text(' 일반 모드', style: TextStyle(fontSize: 13))),
+                            DropdownMenuItem(value: 'bg', child: Text(' 백그라운드', style: TextStyle(fontSize: 13))),
+                          ],
+                          onChanged: (value) => setState(() => runModeChoice = value!),
+                        ),
+                      ),
+                  ],
+                ),
+              if (supports.contains('league_sub') || supports.contains('bg_mode'))
+                const SizedBox(height: 8),
+
               // 주차모드 조건 입력
               if (showParkingConditions) ...[
                 Container(

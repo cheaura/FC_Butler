@@ -283,6 +283,7 @@ class ApiService {
     String? mode,
     bool clubDonation = false,
     Map<String, dynamic>? parkingConditions,
+    Map<String, dynamic>? extra, // 확장 파라미터 (games/shutdown/hour/minute/enabled 등)
   }) async {
     try {
       final requestBody = {
@@ -291,6 +292,7 @@ class ApiService {
         if (mode != null) 'mode': mode,
         'club_donation': clubDonation,
         if (parkingConditions != null) 'parking_conditions': parkingConditions,
+        if (extra != null) ...extra,
       };
 
       final response = await http.post(
@@ -313,14 +315,22 @@ class ApiService {
     }
   }
 
-  // 매크로 시작
-  Future<Map<String, dynamic>> startMacro(String username, String mode, {bool clubDonation = false, Map<String, dynamic>? parkingConditions}) async {
+  // 매크로 시작 (leagueSub: 'manager'|'ai', bgMode: null=PC 설정 유지)
+  Future<Map<String, dynamic>> startMacro(String username, String mode,
+      {bool clubDonation = false,
+      Map<String, dynamic>? parkingConditions,
+      String? leagueSub,
+      bool? bgMode}) async {
     return sendControlCommand(
       username: username,
       action: 'start',
       mode: mode,
       clubDonation: clubDonation,
       parkingConditions: parkingConditions,
+      extra: {
+        if (leagueSub != null) 'league_sub': leagueSub,
+        if (bgMode != null) 'bg_mode': bgMode,
+      },
     );
   }
 
@@ -331,6 +341,38 @@ class ApiService {
       action: 'stop',
     );
   }
+
+  // 일시정지 / 재개
+  Future<Map<String, dynamic>> pauseMacro(String username) =>
+      sendControlCommand(username: username, action: 'pause');
+
+  Future<Map<String, dynamic>> resumeMacro(String username) =>
+      sendControlCommand(username: username, action: 'resume');
+
+  // 예약 정지: N경기 후 정지 (+컴퓨터 종료)
+  Future<Map<String, dynamic>> reserveStop(String username, int games, bool shutdown) =>
+      sendControlCommand(username: username, action: 'reserve_stop',
+          extra: {'games': games, 'shutdown': shutdown});
+
+  Future<Map<String, dynamic>> cancelReserveStop(String username) =>
+      sendControlCommand(username: username, action: 'cancel_reserve_stop');
+
+  // 예약 정지: 시각 지정 (+컴퓨터 종료)
+  Future<Map<String, dynamic>> reserveStopTime(String username, int hour, int minute, bool shutdown) =>
+      sendControlCommand(username: username, action: 'reserve_stop_time',
+          extra: {'hour': hour, 'minute': minute, 'shutdown': shutdown});
+
+  Future<Map<String, dynamic>> cancelReserveStopTime(String username) =>
+      sendControlCommand(username: username, action: 'cancel_reserve_stop_time');
+
+  // 자동재시작 on/off
+  Future<Map<String, dynamic>> setAutoRestart(String username, bool enabled) =>
+      sendControlCommand(username: username, action: 'set_auto_restart',
+          extra: {'enabled': enabled});
+
+  // 전술/기능 토글 (rage_mode/offside_trap/team_press/relegation_defense/club_donation 중 일부)
+  Future<Map<String, dynamic>> setToggles(String username, Map<String, bool> toggles) =>
+      sendControlCommand(username: username, action: 'set_toggles', extra: toggles);
   
   // 알림 목록 조회
   Future<Map<String, dynamic>> getNotifications({int limit = 30}) async {
