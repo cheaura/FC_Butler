@@ -1041,45 +1041,138 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   // ── PC 설정 원격 토글 (자동재시작·전술류) — 2026-07-18 원격 제어 확장 ──
+  // 스위치는 화면의 임시 상태만 바꾸고, [적용]을 눌러야 변경분을 묶어 전송
+  // (실수 방지 + 명령 1~2건으로 일괄 처리. 되돌리기로 PC 현재값 복원)
   Widget _buildRemoteTogglesTile(String username, Map<String, dynamic> cs, bool isRunning) {
     final toggles = cs['toggles'] is Map
         ? Map<String, dynamic>.from(cs['toggles'] as Map)
         : <String, dynamic>{};
-    final autoRestart = cs['auto_restart'] == true;
+    final current = <String, bool>{
+      'auto_restart': cs['auto_restart'] == true,
+      'rage_mode': toggles['rage_mode'] == true,
+      'offside_trap': toggles['offside_trap'] == true,
+      'team_press': toggles['team_press'] == true,
+      'relegation_defense': toggles['relegation_defense'] == true,
+      'club_donation': toggles['club_donation'] == true,
+    };
+    const labels = {
+      'auto_restart': '자동재시작',
+      'rage_mode': '격앙모드',
+      'offside_trap': '옵사트랩',
+      'team_press': '팀압박',
+      'relegation_defense': '강등방어',
+      'club_donation': '클럽기부',
+    };
+    final draft = Map<String, bool>.from(current);
 
-    Widget row(String label, String key, bool value, {bool isAutoRestart = false}) {
-      return SwitchListTile(
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        title: Text(label, style: const TextStyle(fontSize: 13)),
-        value: value,
-        onChanged: (v) => _sendControl(
-          username,
-          isAutoRestart
-              ? widget.apiService.setAutoRestart(username, v)
-              : widget.apiService.setToggles(username, {key: v}),
-          '$label ${v ? '켬' : '끔'} 전송됨',
+    return StatefulBuilder(builder: (context, setState) {
+      final dirtyKeys =
+          draft.keys.where((k) => draft[k] != current[k]).toList();
+
+      Widget row(String key) {
+        final dirty = draft[key] != current[key];
+        return SwitchListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          title: Text('${labels[key]}${dirty ? ' *' : ''}',
+              style: TextStyle(fontSize: 13,
+                  fontWeight: dirty ? FontWeight.bold : FontWeight.normal,
+                  color: dirty ? Colors.orange[700] : null)),
+          value: draft[key]!,
+          onChanged: (v) {
+            setState(() {
+              draft[key] = v;
+              _isInputting = true; // 임시 상태가 자동 새로고침에 지워지지 않게
+            });
+            Future.delayed(const Duration(seconds: 5), () {
+              if (mounted) setState(() => _isInputting = false);
+            });
+          },
+        );
+      }
+
+      return Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          initiallyExpanded: dirtyKeys.isNotEmpty,
+          title: Text(
+              'PC 설정 제어${isRunning ? ' (전술류는 다음 시작부터 적용)' : ''}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+          children: [
+            for (final key in labels.keys) row(key),
+            if (dirtyKeys.isNotEmpty)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('적용 안 된 변경 ${dirtyKeys.length}건',
+                        style: TextStyle(fontSize: 12, color: Colors.orange[700],
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      draft
+                        ..clear()
+                        ..addAll(current);
+                    }),
+                    child: const Text('되돌리기', style: TextStyle(fontSize: 12)),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _applyToggleDraft(username, current, draft),
+                    child: const Text('적용', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+          ],
         ),
       );
-    }
+    });
+  }
 
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        title: Text(
-            'PC 설정 제어${isRunning ? ' (전술류는 다음 시작부터 적용)' : ''}',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-        children: [
-          row('자동재시작', 'auto_restart', autoRestart, isAutoRestart: true),
-          row('격앙모드', 'rage_mode', toggles['rage_mode'] == true),
-          row('옵사트랩', 'offside_trap', toggles['offside_trap'] == true),
-          row('팀압박', 'team_press', toggles['team_press'] == true),
-          row('강등방어', 'relegation_defense', toggles['relegation_defense'] == true),
-          row('클럽기부', 'club_donation', toggles['club_donation'] == true),
-        ],
-      ),
-    );
+  // 토글 임시 상태 적용: 변경분만 묶어 전송 (전술류 1건 + 자동재시작 변경 시 1건)
+  Future<void> _applyToggleDraft(String username,
+      Map<String, bool> current, Map<String, bool> draft) async {
+    final toggleChanges = <String, bool>{};
+    bool? autoRestartChange;
+    draft.forEach((k, v) {
+      if (v == current[k]) return;
+      if (k == 'auto_restart') {
+        autoRestartChange = v;
+      } else {
+        toggleChanges[k] = v;
+      }
+    });
+    final total = toggleChanges.length + (autoRestartChange != null ? 1 : 0);
+    if (total == 0) return;
+
+    bool ok = true;
+    String errMsg = '';
+    if (toggleChanges.isNotEmpty) {
+      final r = await widget.apiService.setToggles(username, toggleChanges);
+      if (r['success'] != true) {
+        ok = false;
+        errMsg = '${r['message']}';
+      }
+    }
+    if (ok && autoRestartChange != null) {
+      final r = await widget.apiService.setAutoRestart(username, autoRestartChange!);
+      if (r['success'] != true) {
+        ok = false;
+        errMsg = '${r['message']}';
+      }
+    }
+    if (!mounted) return;
+    if (ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$username: 설정 변경 $total건 전송됨'),
+            backgroundColor: Colors.green),
+      );
+      await _loadStatus();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오류: $errMsg'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   Widget _buildControlSection(String username, bool isOnline, bool isRunning,
