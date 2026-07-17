@@ -281,7 +281,7 @@ class ApiService {
     required String username,
     required String action,
     String? mode,
-    bool clubDonation = false,
+    bool? clubDonation, // null=미전송 (1.8.1+ 클라는 PC 설정 유지 — 'PC 설정 제어'로 일원화)
     Map<String, dynamic>? parkingConditions,
     Map<String, dynamic>? extra, // 확장 파라미터 (games/shutdown/hour/minute/enabled 등)
   }) async {
@@ -290,7 +290,7 @@ class ApiService {
         'username': username,
         'action': action,
         if (mode != null) 'mode': mode,
-        'club_donation': clubDonation,
+        if (clubDonation != null) 'club_donation': clubDonation,
         if (parkingConditions != null) 'parking_conditions': parkingConditions,
         if (extra != null) ...extra,
       };
@@ -315,9 +315,9 @@ class ApiService {
     }
   }
 
-  // 매크로 시작 (leagueSub: 'manager'|'ai', bgMode: null=PC 설정 유지)
+  // 매크로 시작 (leagueSub: 'manager'|'ai', bgMode/clubDonation: null=PC 설정 유지)
   Future<Map<String, dynamic>> startMacro(String username, String mode,
-      {bool clubDonation = false,
+      {bool? clubDonation,
       Map<String, dynamic>? parkingConditions,
       String? leagueSub,
       bool? bgMode}) async {

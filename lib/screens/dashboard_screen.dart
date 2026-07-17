@@ -400,13 +400,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
   }
 
-  Future<void> _startMacro(String username, String mode, bool clubDonation,
+  Future<void> _startMacro(String username, String mode,
       Map<String, dynamic>? parkingConditions,
       {String? leagueSub, bool? bgMode}) async {
     final result = await widget.apiService.startMacro(
       username,
       mode,
-      clubDonation: clubDonation,
       parkingConditions: parkingConditions,
       leagueSub: leagueSub,
       bgMode: bgMode,
@@ -1086,7 +1085,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget _buildControlSection(String username, bool isOnline, bool isRunning,
       String currentMode, Map<String, dynamic>? controlState) {
     String selectedMode = 'coach';
-    bool clubDonation = false;
     bool showParkingConditions = false;
     String leagueSub = 'manager';   // 리그모드 서브모드 (감독전/AI전)
     String runModeChoice = 'keep';  // 실행 방식: keep=PC 설정 유지 / normal / bg
@@ -1250,7 +1248,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           }
                         }
                         
-                        _startMacro(username, selectedMode, clubDonation, parkingConditions,
+                        _startMacro(username, selectedMode, parkingConditions,
                             leagueSub: selectedMode == 'league' ? leagueSub : null,
                             bgMode: runModeChoice == 'keep' ? null : runModeChoice == 'bg');
                       },
@@ -1507,17 +1505,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 const SizedBox(height: 8),
               ],
               
-              CheckboxListTile(
-                value: clubDonation,
-                onChanged: (value) {
-                  setState(() {
-                    clubDonation = value!;
-                  });
-                },
-                title: const Text(' 클럽 기부 (5경기마다)', style: TextStyle(fontSize: 14)),
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-              ),
+              // 클럽 기부 시작용 체크박스 제거 (2026-07-18) — 'PC 설정 제어' 토글로 일원화.
+              // 시작 명령에 club_donation을 보내지 않으면 1.8.1+ 클라가 PC 설정을 유지함
             ],
             if (!isOnline) ...[
               Container(
