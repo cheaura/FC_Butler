@@ -537,6 +537,13 @@ class ApiService {
         timeoutSec: 15);
   }
 
+  // 시간대별 승률 (2026-07-25, 웹 대시보드와 동일 API — 전체/최근30일/최근15일 × 24시간)
+  Future<Map<String, dynamic>> getHourlyWinrate(String username) async {
+    return _authGet(
+        '/api/user/hourly-winrate?username=${Uri.encodeComponent(username)}',
+        timeoutSec: 15);
+  }
+
   // 시즌 D-day 조회
   Future<Map<String, dynamic>> getSeasonInfo() async {
     try {

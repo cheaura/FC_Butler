@@ -55,6 +55,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Map<String, dynamic>? _fcMiningData;
   Map<String, dynamic>? _rankScoreData;
   Map<String, dynamic>? _matchCountData;
+
+  // 시간대별 승률 (2026-07-25, 웹 대시보드 카드 이식)
+  Map<String, dynamic>? _hourlyWinrateData;
+  int? _hwSelectedWindow;  // 히트맵에서 탭한 셀 (구간 인덱스)
+  int? _hwSelectedHour;    // 히트맵에서 탭한 셀 (시간)
   
   // 전적 필터 상태
   String _matchMode = 'manager_mode';  // manager_mode, official_mode, classic_1on1
@@ -106,6 +111,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           _loadFCStatistics();
           _loadRankScoreStatistics();
           _loadMatchCountStatistics();
+          _loadHourlyWinrate();
         }
       } else if (_tabController.index == 2 && _selectedAccount != null && _selectedAccount!.isNotEmpty) {
         // 전적 탭: 최초 1회만 로드 (이후 스와이프로 갱신)
@@ -291,6 +297,33 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('경기수 로드 실패: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadHourlyWinrate() async {
+    if (_selectedAccount == null || _selectedAccount!.isEmpty) return;
+
+    setState(() {
+      _statisticsLoadingCount++;
+    });
+
+    try {
+      final data = await _apiService.getHourlyWinrate(_selectedAccount!);
+      setState(() {
+        _hourlyWinrateData = data;
+        _hwSelectedWindow = null;
+        _hwSelectedHour = null;
+        _statisticsLoadingCount--;
+      });
+    } catch (e) {
+      setState(() {
+        _statisticsLoadingCount--;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('시간대별 승률 로드 실패: $e')),
         );
       }
     }
@@ -1657,6 +1690,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 _loadFCStatistics();
                 _loadRankScoreStatistics();
                 _loadMatchCountStatistics();
+                _loadHourlyWinrate();
                 _loadMatchHistory();
               },
             ),
@@ -1676,6 +1710,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         _loadFCStatistics();
         _loadRankScoreStatistics();
         _loadMatchCountStatistics();
+        _loadHourlyWinrate();
       },
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -1694,6 +1729,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
             // 경기수 차트
             _buildMatchCountChart(),
+            const SizedBox(height: 24),
+
+            // 시간대별 승률 히트맵
+            _buildHourlyWinrateCard(),
           ],
         ),
       ),
@@ -2737,6 +2776,290 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       ),
     );
   }  // _buildStatisticsTab 끝
+
+  // ===== 시간대별 승률 히트맵 (2026-07-25, 웹 대시보드 카드 이식) =====
+
+  static const double _hwClamp = 10.0; // 색 스케일 상한 ±10%p (이상은 포화)
+
+  // 웹(static/user/hourly_winrate.js)과 동일한 발산형 팔레트 (라이트/다크)
+  Map<String, Color> _hwPalette() {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return dark
+        ? {
+            'pos': const Color(0xFF5B9BD5), // 평균 이상 (파랑)
+            'neg': const Color(0xFFE0685C), // 평균 이하 (빨강)
+            'mid': const Color(0xFF3A3F47), // 편차 0 근처
+            'empty': const Color(0xFF25282E), // 경기 없음
+            'muted': const Color(0xFFADB5BD),
+            'ink': const Color(0xFFE9ECEF),
+            'outline': const Color(0xFFE9ECEF),
+          }
+        : {
+            'pos': const Color(0xFF2A78D6),
+            'neg': const Color(0xFFE34948),
+            'mid': const Color(0xFFF0EFEC),
+            'empty': const Color(0xFFE1E0D9),
+            'muted': const Color(0xFF6C757D),
+            'ink': const Color(0xFF212529),
+            'outline': const Color(0xFF333333),
+          };
+  }
+
+  // 편차(dev)를 ±10%p에서 포화시켜 mid↔pos/neg 선형 보간
+  Color _hwDivColor(double dev, Map<String, Color> pal) {
+    final t = (dev.abs() / _hwClamp).clamp(0.0, 1.0);
+    return Color.lerp(pal['mid'], dev >= 0 ? pal['pos'] : pal['neg'], t)!;
+  }
+
+  // 셀 배경 명도에 따라 글자색 자동 대비 (웹과 동일 공식)
+  Color _hwInkFor(Color bg) {
+    final l = (0.299 * bg.red + 0.587 * bg.green + 0.114 * bg.blue) / 255;
+    return l > 0.55 ? const Color(0xFF0B0B0B) : Colors.white;
+  }
+
+  String _hwFmtPick(dynamic c) {
+    if (c == null) return '—';
+    final dev = (c['dev'] as num?)?.toDouble() ?? 0.0;
+    return "${c['h']}시 ${c['wr']}% (${dev > 0 ? '+' : ''}$dev%p)";
+  }
+
+  Widget _buildHourlyWinrateCard() {
+    final resp = _hourlyWinrateData;
+    final data = (resp != null && resp['success'] == true) ? resp['data'] : null;
+    final pal = _hwPalette();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('시간대별 승률', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                if (data != null)
+                  Text('${data['d_min']} ~ ${data['d_max']}',
+                      style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (resp == null)
+              const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('불러오는 중...'),
+              ))
+            else if (resp['success'] != true)
+              Center(child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(resp['error']?.toString() ?? '조회에 실패했습니다'),
+              ))
+            else if (data == null)
+              const Center(child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text('아직 집계할 경기 기록이 없습니다'),
+              ))
+            else ...[
+              // 구간별 요약 (경기수·평균·최고/최저 시간)
+              ...(data['windows'] as List).map((w) => _buildHwSummaryLine(w)),
+              const SizedBox(height: 10),
+              // 히트맵 (24시간 × 3구간, 가로 스크롤)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: _buildHwHeatmap(data, pal),
+              ),
+              const SizedBox(height: 8),
+              _buildHwSelectedDetail(data),
+              const SizedBox(height: 8),
+              _buildHwLegend(data, pal),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHwSummaryLine(dynamic w) {
+    final label = w['label']?.toString() ?? '';
+    if (w['empty'] == true) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text('$label: 해당 기간 경기 없음',
+            style: TextStyle(fontSize: 11.5, color: Theme.of(context).hintColor)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        '$label: ${w['n']}경기 · 평균 ${w['avg']}% · 최고 ${_hwFmtPick(w['best'])} · 최저 ${_hwFmtPick(w['worst'])}',
+        style: const TextStyle(fontSize: 11.5),
+      ),
+    );
+  }
+
+  Widget _buildHwHeatmap(Map<String, dynamic> data, Map<String, Color> pal) {
+    final windows = data['windows'] as List;
+    final minN = (data['min_pick_n'] as num?)?.toInt() ?? 10;
+    const cellW = 34.0, cellH = 28.0, labelW = 70.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 시간 라벨 행
+        Row(
+          children: [
+            const SizedBox(width: labelW),
+            ...List.generate(24, (h) => SizedBox(
+                  width: cellW,
+                  child: Text('$h시',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 9, color: pal['muted'])),
+                )),
+          ],
+        ),
+        const SizedBox(height: 2),
+        // 구간별 행
+        ...windows.asMap().entries.map((entry) {
+          final wi = entry.key;
+          final w = entry.value;
+          final hours = (w['empty'] == true) ? null : (w['hours'] as List?);
+          return Row(
+            children: [
+              SizedBox(
+                width: labelW,
+                child: Text(w['label']?.toString() ?? '',
+                    style: TextStyle(fontSize: 10, color: pal['ink']),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              ...List.generate(24, (h) {
+                final c = (hours != null && h < hours.length) ? hours[h] : null;
+                return _buildHwCell(wi, h, c, minN, w['best'], w['worst'], pal, cellW, cellH);
+              }),
+            ],
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildHwCell(int wi, int h, dynamic c, int minN, dynamic best, dynamic worst,
+      Map<String, Color> pal, double cellW, double cellH) {
+    final n = (c?['n'] as num?)?.toInt() ?? 0;
+    if (c == null || n == 0) {
+      return Padding(
+        padding: const EdgeInsets.all(1),
+        child: Container(
+          width: cellW - 2,
+          height: cellH - 2,
+          decoration: BoxDecoration(
+            color: pal['empty'],
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      );
+    }
+    final dev = (c['dev'] as num?)?.toDouble() ?? 0.0;
+    final low = n < minN;
+    final bg = _hwDivColor(dev, pal);
+    final isBest = best != null && best['h'] == h;
+    final isWorst = worst != null && worst['h'] == h;
+    final selected = _hwSelectedWindow == wi && _hwSelectedHour == h;
+
+    Widget inner = Container(
+      width: cellW - 2,
+      height: cellH - 2,
+      decoration: BoxDecoration(
+        color: low ? bg.withOpacity(0.45) : bg,
+        borderRadius: BorderRadius.circular(3),
+        // 최고 시간=실선 테두리, 탭 선택=강조색 테두리 (최저는 아래 점선 페인터)
+        border: (selected || isBest)
+            ? Border.all(color: selected ? pal['pos']! : pal['outline']!, width: 2)
+            : null,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '${dev > 0 ? '+' : ''}${dev.toStringAsFixed(1)}',
+        style: TextStyle(fontSize: 8.5, color: low ? pal['muted'] : _hwInkFor(bg)),
+      ),
+    );
+    if (isWorst && !isBest && !selected) {
+      inner = CustomPaint(
+        foregroundPainter: _HwDashedRectPainter(pal['outline']!),
+        child: inner,
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(1),
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _hwSelectedWindow = wi;
+          _hwSelectedHour = h;
+        }),
+        child: inner,
+      ),
+    );
+  }
+
+  Widget _buildHwSelectedDetail(Map<String, dynamic> data) {
+    final wi = _hwSelectedWindow;
+    final h = _hwSelectedHour;
+    if (wi == null || h == null) {
+      return Text('셀을 누르면 상세 정보가 표시됩니다',
+          style: TextStyle(fontSize: 10.5, color: Theme.of(context).hintColor));
+    }
+    final windows = data['windows'] as List;
+    if (wi >= windows.length) return const SizedBox.shrink();
+    final w = windows[wi];
+    final hours = (w['empty'] == true) ? null : (w['hours'] as List?);
+    final c = (hours != null && h < hours.length) ? hours[h] : null;
+    if (c == null || ((c['n'] as num?)?.toInt() ?? 0) == 0) return const SizedBox.shrink();
+    final minN = (data['min_pick_n'] as num?)?.toInt() ?? 10;
+    final dev = (c['dev'] as num?)?.toDouble() ?? 0.0;
+    final lowNote = (c['n'] as num).toInt() < minN ? ' · 표본 $minN경기 미만(참고만)' : '';
+    return Text(
+      '${w['label']} · ${c['h']}시 — 승률 ${c['wr']}% (${c['n']}경기) · 구간 평균 ${w['avg']}% 대비 ${dev > 0 ? '+' : ''}$dev%p$lowNote',
+      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+    );
+  }
+
+  Widget _buildHwLegend(Map<String, dynamic> data, Map<String, Color> pal) {
+    final minN = (data['min_pick_n'] as num?)?.toInt() ?? 10;
+    final style = TextStyle(fontSize: 9.5, color: Theme.of(context).hintColor);
+    Widget sw(Color c, {BoxBorder? border, double opacity = 1}) => Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: c.withOpacity(opacity),
+            border: border,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        );
+    Widget item(Widget swatch, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [swatch, const SizedBox(width: 3), Text(label, style: style)],
+        );
+    return Wrap(
+      spacing: 10,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('구간 평균 대비:', style: style),
+        for (final v in [-10.0, -5.0, 0.0, 5.0, 10.0])
+          item(sw(_hwDivColor(v, pal)), '${v > 0 ? '+' : ''}${v.toInt()}%p'),
+        item(sw(_hwDivColor(-5, pal), opacity: 0.45), '흐림=$minN경기 미만'),
+        item(sw(pal['empty']!), '경기 없음'),
+        item(sw(Colors.transparent, border: Border.all(color: pal['outline']!, width: 2)), '최고 시간'),
+        item(
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CustomPaint(painter: _HwDashedRectPainter(pal['outline']!)),
+          ),
+          '최저 시간',
+        ),
+      ],
+    );
+  }
 
   Widget _buildMatchHistoryTab() {
     return RefreshIndicator(
@@ -3856,3 +4179,32 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
 
 
 
+
+/// 시간대별 승률 히트맵의 '최저 시간' 점선 테두리 페인터 (웹 stroke-dasharray 대응)
+class _HwDashedRectPainter extends CustomPainter {
+  final Color color;
+  _HwDashedRectPainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    const dash = 4.0, gap = 3.0;
+    final rrect = RRect.fromRectAndRadius(
+        Offset.zero & size, const Radius.circular(3));
+    final path = Path()..addRRect(rrect);
+    for (final metric in path.computeMetrics()) {
+      double d = 0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, d + dash), paint);
+        d += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _HwDashedRectPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
