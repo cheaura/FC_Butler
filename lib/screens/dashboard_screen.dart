@@ -651,26 +651,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final highestScoreTime = account['highest_score_time'] ?? '';
     final timeAgo = account['time_ago'] ?? '알 수 없음';
     
-    // 전적에 승률 추가
-    String record = recordRaw;
-    try {
-      final parts = recordRaw.split('-');
-      if (parts.length == 3) {
-        final wins = int.parse(parts[0]);
-        final draws = int.parse(parts[1]);
-        final losses = int.parse(parts[2]);
-        final total = wins + draws + losses;
-        if (total > 0) {
-          final winRate = (wins / total * 100).toStringAsFixed(1);
-          record = '$wins-$draws-$losses($winRate%)';
-        } else {
-          record = '0-0-0(0.0%)';
-        }
-      }
-    } catch (e) {
-      // 파싱 실패 시 원본 사용
-    }
-
     final isOnline = status == 'online';
     final isRunning = isOnline && mode.isNotEmpty && mode != 'stopped' && mode != '정지';
 
@@ -879,7 +859,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 _buildInfoItem(Icons.emoji_events, '티어', tier),
                 _buildInfoItem(Icons.star, '점수', _formatNumber(score)),
                 _buildInfoItem(Icons.leaderboard, '순위', _formatNumber(rank)),
-                _buildInfoItem(Icons.poll, '전적(승-무-패)', record),
                 _buildInfoItem(Icons.monetization_on, 'FC', '$fcTotal FC'),
                 _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore), subtitle: highestScoreTime.isNotEmpty ? highestScoreTime : null),
                 if (account['protection_status'] != null && account['protection_status'].toString().isNotEmpty)
@@ -890,6 +869,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   ),
               ],
             ),
+            // 전적 5칸 표기 (승/무/패 | 전체·무제외 승률) — 전체 폭
+            const SizedBox(height: 8),
+            _buildRecordColumns(recordRaw),
             // 최근 경기 승무패 도트 (20경기, 스와이프+기본버튼)
             Builder(builder: (context) {
               final rawResults = account['recent_results'] ?? [];
@@ -955,6 +937,67 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
         ),
       ],
+    );
+  }
+
+  /// 전적 5칸 표기 — 승/무/패(고유색) + 전체 승률/무제외 승률 (recordRaw: "W-D-L")
+  Widget _buildRecordColumns(String recordRaw) {
+    int wins = 0, draws = 0, losses = 0;
+    try {
+      final parts = recordRaw.split('-');
+      if (parts.length == 3) {
+        wins = int.parse(parts[0]);
+        draws = int.parse(parts[1]);
+        losses = int.parse(parts[2]);
+      }
+    } catch (e) {
+      // 파싱 실패 시 0-0-0으로 표기
+    }
+    final total = wins + draws + losses;
+    final rateAll = total > 0 ? (wins / total * 100).toStringAsFixed(1) : '0.0';
+    final woTotal = wins + losses;
+    final rateWo = woTotal > 0 ? (wins / woTotal * 100).toStringAsFixed(1) : '0.0';
+
+    const winColor = Color(0xFF179C4B);
+    const drawColor = Color(0xFF7D867E);
+    const loseColor = Color(0xFFD63C3C);
+
+    Widget countCol(String label, int value, Color color) => Expanded(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
+          Text('$value', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+        ],
+      ),
+    );
+
+    Widget rateCol(String label, String value) => Expanded(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[600])),
+          Text(value, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Colors.grey[850])),
+        ],
+      ),
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF6F7F9),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          countCol('승', wins, winColor),
+          countCol('무', draws, drawColor),
+          countCol('패', losses, loseColor),
+          Container(width: 1, height: 28, color: const Color(0xFFDDE1E6)),
+          rateCol('전체 승률', '$rateAll%'),
+          rateCol('무제외 승률', '$rateWo%'),
+        ],
+      ),
     );
   }
 
@@ -4104,18 +4147,32 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
                         physics: const BouncingScrollPhysics(),
                         itemBuilder: (context, index) {
                           final r = widget.results[index];
-                          final color = r == 'WIN'
-                              ? const Color(0xFF2196F3)
+                          // 인게임 스타일 사각 타일 (승 초록 / 무 회백 / 패 빨강)
+                          final bg = r == 'WIN'
+                              ? const Color(0xFF1FAB55)
                               : r == 'DRAW'
-                                  ? const Color(0xFFFFC107)
-                                  : const Color(0xFFF44336);
+                                  ? const Color(0xFFCFD6CF)
+                                  : const Color(0xFFE04B4B);
+                          final fg = r == 'DRAW'
+                              ? const Color(0xFF39413A)
+                              : Colors.white;
+                          final ch = r == 'WIN' ? '승' : r == 'DRAW' ? '무' : '패';
                           return Center(
-                            child: Text(
-                              r == 'DRAW' ? '▲' : '●',
-                              style: TextStyle(
-                                color: color,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
+                            child: Container(
+                              width: (_dotWidth - 2).clamp(8.0, 16.0),
+                              height: 19,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: bg,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                              child: Text(
+                                ch,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           );
@@ -4145,30 +4202,29 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
             const SizedBox(width: 8),
-            _badge('${wins}승', const Color(0xFF2196F3)),
+            _badge('승 $wins', const Color(0xFF1FAB55), Colors.white),
             const SizedBox(width: 4),
-            _badge('${draws}무', const Color(0xFFFFC107)),
+            _badge('무 $draws', const Color(0xFFCFD6CF), const Color(0xFF39413A)),
             const SizedBox(width: 4),
-            _badge('${losses}패', const Color(0xFFF44336)),
+            _badge('패 $losses', const Color(0xFFE04B4B), Colors.white),
           ],
         ),
       ],
     );
   }
 
-  Widget _badge(String text, Color color) {
+  Widget _badge(String text, Color bg, Color fg) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.5)),
       ),
       child: Text(
         text,
         style: TextStyle(
           fontSize: 12,
-          color: color,
+          color: fg,
           fontWeight: FontWeight.bold,
         ),
       ),
