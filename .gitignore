@@ -58,3 +58,16 @@ github_token.txt
 MacinCloud_*
 MacinCloud_*/
 *.backup_*
+
+# 서명 키/시크릿 (절대 커밋 금지 — 2026-08-15 스토어 준비)
+android/key.properties
+*.jks
+*.keystore
+*.p8
+github_token.txt
+*firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
+
+# 백업/작업 보관
+old/

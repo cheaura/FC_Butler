@@ -1,4 +1,4 @@
-package com.example.fc_macro_app
+package com.fcbutler.app
 
 import io.flutter.embedding.android.FlutterActivity
 
