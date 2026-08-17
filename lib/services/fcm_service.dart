@@ -147,7 +147,7 @@ class FCMService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userToken = prefs.getString('auth_token');  // 'user_token' → 'auth_token' 변경
-      final serverUrl = prefs.getString('server_url') ?? 'http://218.146.16.144:5000';
+      final serverUrl = prefs.getString('server_url') ?? 'https://api.panenka9.com';
 
       if (userToken == null) {
         print('[FCM] 서버 토큰이 없어 FCM 토큰 전송 불가');
@@ -183,7 +183,7 @@ class FCMService {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final serverUrl = prefs.getString('server_url') ?? 'http://218.146.16.144:5000';
+      final serverUrl = prefs.getString('server_url') ?? 'https://api.panenka9.com';
 
       final response = await http.post(
         Uri.parse('$serverUrl/api/user/fcm_token'),

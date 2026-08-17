@@ -9,7 +9,7 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
   
-  static const String baseUrl = 'http://218.146.16.144:5000';
+  static const String baseUrl = 'https://api.panenka9.com';
   String? _token;
   String? _username;
   String? _accountType; // 'macro'=매크로 연동(전체 탭) / 'public'=공개 가입(조회만)
