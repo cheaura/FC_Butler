@@ -1,4 +1,4 @@
-package com.fcbutler.app
+package com.panenka.app
 
 import io.flutter.embedding.android.FlutterActivity
 

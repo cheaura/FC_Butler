@@ -51,8 +51,8 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyAIGBMFAHsbyFQoJotXKfjky8vKjQDogIA',
-    // com.fcbutler.app 안드로이드 앱의 appId (구 com.example.fc_macro_app에서 전환, 2026-08-15)
-    appId: '1:861190368108:android:93a6c58f32a2b920d16149',
+    // com.panenka.app 안드로이드 앱의 appId (Panenka 전환, 2026-08-16 — 구 com.fcbutler.app)
+    appId: '1:861190368108:android:8e8a1b0c040ee1dad16149',
     messagingSenderId: '861190368108',
     projectId: 'dd-fconline4',
     storageBucket: 'dd-fconline4.firebasestorage.app',

@@ -100,8 +100,8 @@ class FCMService {
     // Android 알림 채널 생성
     const androidChannel = AndroidNotificationChannel(
       'fc_macro_high_importance', // 채널 ID
-      'FC Butler 중요 알림', // 채널 이름
-      description: 'FC Online 4 매크로 상태 알림',
+      'Panenka 중요 알림', // 채널 이름
+      description: 'Panenka 상태 알림',
       importance: Importance.high,
       playSound: true,
       enableVibration: true,
@@ -125,8 +125,8 @@ class FCMService {
         NotificationDetails(
           android: AndroidNotificationDetails(
             'fc_macro_high_importance',
-            'FC Butler 중요 알림',
-            channelDescription: 'FC Online 4 매크로 상태 알림',
+            'Panenka 중요 알림',
+            channelDescription: 'Panenka 상태 알림',
             importance: Importance.high,
             priority: Priority.high,
             showWhen: true,

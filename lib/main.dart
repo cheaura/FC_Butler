@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'providers/theme_provider.dart';
-import 'screens/login_screen.dart';
-import 'screens/dashboard_screen.dart';
+import 'screens/consent_screen.dart';
+import 'screens/public_home_screen.dart';
+import 'widgets/panenka_logo.dart';
 import 'services/api_service.dart';
 import 'services/fcm_service.dart';
 
@@ -40,7 +41,7 @@ class FCMacroApp extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
     
     return MaterialApp(
-      title: 'FC Butler',
+      title: 'Panenka',
       debugShowCheckedModeBanner: false,
       theme: themeProvider.lightTheme,
       darkTheme: themeProvider.darkTheme,
@@ -73,34 +74,34 @@ class _SplashScreenState extends State<SplashScreen> {
     
     final result = await _apiService.checkAutoLogin();
     
-    if (mounted) {
-      if (result['success'] == true) {
-        // 자동로그인 성공 - FCM 토큰 서버 전송
-        final token = _apiService.token;
-        if (token != null) {
-          await FCMService().sendTokenToServerWithAuth(token);
-        }
-        
-        // 대시보드로 이동
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => DashboardScreen(
-              username: result['username'],
-              apiService: _apiService,
-            ),
-          ),
-        );
-      } else {
-        // 자동로그인 실패 - 로그인 화면으로 이동
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const LoginScreen(),
-          ),
-        );
+    if (!mounted) return;
+
+    Widget target;
+    if (result['success'] == true && result['account_type'] == 'macro') {
+      // 매크로 연동 계정 - FCM 토큰 전송 후 탭 셸(매크로 탭에서 시작)로
+      // 매크로 대시보드는 셸의 매크로 탭에 그대로 임베드 (기능·표현 전부 유지)
+      final token = _apiService.token;
+      if (token != null) {
+        await FCMService().sendTokenToServerWithAuth(token);
       }
+      target = const PublicHomeScreen(
+          initialIndex: PublicHomeScreen.macroTabIndex);
+    } else {
+      // 공개 계정 로그인 또는 비로그인(게스트) - 홈 탭으로
+      // (조회 기능은 로그인 없이 사용 가능, 로그인/가입은 더보기 탭에서 진입)
+      target = const PublicHomeScreen();
     }
+
+    // 최초 실행 시 이용약관·개인정보처리방침 동의 (게스트 포함 전체 이용자)
+    final agreed = await ConsentScreen.isAgreed();
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            agreed ? target : ConsentScreen(next: target),
+      ),
+    );
   }
 
   @override
@@ -111,21 +112,17 @@ class _SplashScreenState extends State<SplashScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF1a237e), Color(0xFF0d47a1)],
+            colors: [Color(0xFF2A1B54), Color(0xFF100F1A)],
           ),
         ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
-              Icon(
-                Icons.sports_soccer,
-                size: 100,
-                color: Colors.white,
-              ),
+              PanenkaLogo(size: 100),
               SizedBox(height: 24),
               Text(
-                'FC Butler',
+                'Panenka',
                 style: TextStyle(
                   fontSize: 36,
                   fontWeight: FontWeight.bold,

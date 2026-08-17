@@ -1,5 +1,5 @@
 name: fc_macro_app
-description: "FCButler - remote monitoring dashboard app for the FCButler PC program."
+description: "Panenka - FC Online stats and companion dashboard."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.4.3+23
+version: 1.0.0+1
 
 environment:
   sdk: ^3.5.4
@@ -45,6 +45,7 @@ dependencies:
   flutter_local_notifications: ^17.2.3
   firebase_core: ^3.8.1
   firebase_messaging: ^15.1.5
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_launcher_icons: "^0.13.1"
@@ -68,6 +69,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/icon.png  # 브랜드 로고 (스플래시·로그인·매크로 앱바)
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -99,3 +103,4 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+

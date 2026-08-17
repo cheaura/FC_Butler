@@ -1,6 +1,11 @@
+# Panenka 런처 아이콘 (2026-08-16)
+# ⚠️ 이 파일이 pubspec.yaml의 flutter_launcher_icons 블록보다 우선한다
+# - icon_home.png : 두꺼운 띠 디자인을 안쪽 배치한 레거시용 (마스크 잘림 방지)
+# - icon_fg.png   : 적응형 전경 (안전영역 내 배치)
 flutter_launcher_icons:
   android: true
-  ios: true
-  image_path: "assets/icon.png"
-  min_sdk_android: 21
-  remove_alpha_ios: true
+  ios: false
+  image_path: "assets/icon_home.png"
+  min_sdk_android: 23
+  adaptive_icon_background: "#0C0A1E"
+  adaptive_icon_foreground: "assets/icon_fg.png"

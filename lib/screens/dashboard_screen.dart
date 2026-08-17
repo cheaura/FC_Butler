@@ -5,15 +5,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/api_service.dart';
+import '../widgets/panenka_logo.dart';
+import '../widgets/pill_nav_bar.dart';
+import 'match_detail_screen.dart';
 import '../providers/theme_provider.dart';
 import '../services/socket_service.dart';
-import 'package:http/http.dart' as http;
-import 'package:html/parser.dart' as html_parser;
-import 'package:html/dom.dart' as dom;
-import 'login_screen.dart';
+import 'public_home_screen.dart';
 import 'notifications_screen.dart';
 import 'market_tab.dart';
 import 'analysis_tab.dart';
+import '../widgets/ranking_tab.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -78,12 +79,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   final int _matchesPerPage = 10;  // 한 번에 로드할 경기 수
 
   // 랭킹 탭 상태
-  String _rankingMode = 'manager';
-  List<Map<String, dynamic>> _top40Rankings = [];
-  List<Map<String, dynamic>> _bottom11Rankings = [];
-  Map<String, dynamic>? _cutlines;
-  bool _rankingLoading = false;
-  String _rankingDateInfo = '';
 
   // 시즌 D-day
   int? _seasonDaysRemaining;
@@ -91,7 +86,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   // 탭별 최초 로드 여부 (탭 전환 시 중복 로드 방지)
   bool _statisticsLoaded = false;
   bool _matchHistoryLoaded = false;
-  bool _rankingLoaded = false;
 
   @override
   void initState() {
@@ -118,12 +112,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         if (!_matchHistoryLoaded) {
           _matchHistoryLoaded = true;
           _loadMatchHistory();
-        }
-      } else if (_tabController.index == 3) {
-        // 랭킹 탭: 최초 1회만 로드 (이후 스와이프로 갱신)
-        if (!_rankingLoaded) {
-          _rankingLoaded = true;
-          _loadRankingData();
         }
       }
     });
@@ -495,19 +483,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.sports_soccer, size: 24),
-            SizedBox(width: 8),
-            // 좁은 화면·큰 글꼴에서 가로 넘침(OVERFLOWED 경고) 방지 — 넘치면 말줄임
-            Flexible(
-              child: Text('FC Online 4',
-                  overflow: TextOverflow.ellipsis, softWrap: false, maxLines: 1),
-            ),
-          ],
-        ),
-        backgroundColor: const Color(0xFF1a237e),
+        // 우측 요소(시즌 D-day 등)에 밀려 텍스트가 잘리던 문제 — 아이콘만 표시 (2026-08-16)
+        title: const PanenkaLogo(size: 28),
+        backgroundColor: const Color(0xFF2A1B54), // 퍼플 브랜드 (2026-08-17 개편)
         actions: [
           if (_seasonDaysRemaining != null)
             Padding(
@@ -565,30 +543,36 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             onPressed: () async {
               await widget.apiService.logout();
               Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
+                MaterialPageRoute(builder: (context) => const PublicHomeScreen()),
                 (route) => false,
               );
             },
             tooltip: '로그아웃',
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,  // 6탭 — 좁은 화면에서 좌우 스크롤
-          tabAlignment: TabAlignment.start,  // 기본 startOffset의 좌측 여백 제거
-          labelColor: Colors.white,  // ✅ 다크/라이트 모두 흰색으로 통일
-          unselectedLabelColor: Theme.of(context).brightness == Brightness.dark
-              ? Colors.white60
-              : Colors.white70,  // ✅ 라이트 모드에서도 약간 투명한 흰색
-          indicatorColor: Theme.of(context).primaryColor,
-          tabs: const [
-            Tab(icon: Icon(Icons.dashboard), text: '상태'),
-            Tab(icon: Icon(Icons.bar_chart), text: '통계'),
-            Tab(icon: Icon(Icons.list), text: '전적'),
-            Tab(icon: Icon(Icons.emoji_events), text: '랭킹'),
-            Tab(icon: Icon(Icons.storefront), text: '이적시장'),
-            Tab(icon: Icon(Icons.pie_chart), text: '전적분석'),
-          ],
+        // 상단 탭 — 하단 탭바와 완전히 동일한 위젯(PanenkaPillBar) 공유 (사용자 지정).
+        // 탭 구성·기능은 기존 6탭 그대로, TabController와 양방향 동기.
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(58),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: AnimatedBuilder(
+              animation: _tabController,
+              builder: (context, _) => PanenkaPillBar(
+                height: 50,
+                items: const [
+                  PillBarItem(Icons.dashboard, '상태'),
+                  PillBarItem(Icons.bar_chart, '통계'),
+                  PillBarItem(Icons.list, '전적'),
+                  PillBarItem(Icons.emoji_events, '랭킹'),
+                  PillBarItem(Icons.storefront, '이적시장'),
+                  PillBarItem(Icons.pie_chart, '전적분석'),
+                ],
+                selectedIndex: _tabController.index,
+                onSelected: (i) => _tabController.animateTo(i),
+              ),
+            ),
+          ),
         ),
       ),
       body: TabBarView(
@@ -597,7 +581,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           _buildStatusTab(),
           _buildStatisticsTab(),
           _buildMatchHistoryTab(),
-          _buildRankingTab(),
+          const RankingTab(),  // 넥슨 직접 크롤링 — 공용 위젯 (게스트 홈과 공유)
           // 계정 전환 시 상태가 초기화되도록 계정명을 key로 사용
           MarketTab(key: ValueKey('market-$_selectedAccount'), username: _selectedAccount),
           AnalysisTab(key: ValueKey('analysis-$_selectedAccount'), username: _selectedAccount),
@@ -680,7 +664,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               children: [
                 Row(
                   children: [
-                    Icon(Icons.person, color: Colors.blue[700], size: 20),
+                    Icon(Icons.person, color: const Color(0xFF7C3AED), size: 20),
                     const SizedBox(width: 8),
                     Text(
                       username,
@@ -911,7 +895,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle}) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: Colors.blue[700]),
+        Icon(icon, size: 16, color: const Color(0xFF7C3AED)),
         const SizedBox(width: 4),
         Expanded(
           child: Column(
@@ -1424,7 +1408,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('시작'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1a237e),
+                        backgroundColor: const Color(0xFF7C3AED),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
@@ -1485,12 +1469,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   decoration: BoxDecoration(
                     color: Theme.of(context).brightness == Brightness.dark
                         ? Colors.grey[850]
-                        : Colors.blue[50],
+                        : const Color(0xFFEDE9FE),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: Theme.of(context).brightness == Brightness.dark
                           ? Colors.grey[700]!
-                          : Colors.blue[200]!,
+                          : const Color(0xFFC4B5FD),
                     ),
                   ),
                   child: Column(
@@ -3439,10 +3423,26 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     Color resultColor = Colors.grey;
     if (result.contains('승')) resultColor = Colors.green;
     else if (result.contains('패')) resultColor = Colors.red;
-    
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        // 경기 탭 → 경기별 분석 (요약/스쿼드/선수 — 공개 검색 탭과 동일 화면)
+        onTap: match['matchId'] == null
+            ? null
+            : () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MatchDetailScreen(
+                      matchId: match['matchId'].toString(),
+                      myName: match['manager_name']?.toString() ??
+                          widget.username,
+                      mode: _matchMode == 'manager_mode' ? 'manager' : '1vs1',
+                    ),
+                  ),
+                );
+              },
         leading: CircleAvatar(
           backgroundColor: resultColor,
           child: Text(
@@ -3458,11 +3458,21 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           match['matchDate'] ?? '',
           style: const TextStyle(fontSize: 12),
         ),
-        trailing: Text(
-          match['penalty_score'] != null
-            ? '${match['score']} (${match['penalty_score']})'
-            : match['score'] ?? '',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              match['score'] ?? '',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            // 승부차기 표기: "2:2" + "승부차기 1:4" (사용자 지정 형식)
+            if (match['penalty_score'] != null)
+              Text(
+                '승부차기 ${match['penalty_score']}',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+          ],
         ),
       ),
     );
@@ -3494,542 +3504,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
   }
 
-  // ===== 시즌별 순위 데이터 가져오기 (재시도 포함) =====
-  Future<String?> _fetchSeasonRank(
-    Map<String, String> season,
-    String rtMode,
-    Map<String, String> headers, {
-    required String rank,
-    int page = 1,
-    int maxAttempts = 2,
-  }) async {
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        final pageParam = page > 1 ? '&n4pageno=$page' : '';
-        final url = 'https://fconline.nexon.com/datacenter/rank_inner?rt=$rtMode&n4seasonno=${season['no']}$pageParam';
-        
-        final response = await http.get(Uri.parse(url), headers: headers).timeout(Duration(seconds: 10));
-        
-        if (response.statusCode == 200) {
-          final doc = html_parser.parse(response.body);
-          final rows = doc.querySelectorAll('.tbody .tr');
-          
-          // 원하는 순위 데이터 찾기
-          for (var row in rows) {
-            final rankElem = row.querySelector('.rank_no');
-            if (rankElem != null && rankElem.text.trim() == rank) {
-              final scoreElem = row.querySelector('.rank_r_win_point');
-              if (scoreElem != null) {
-                final score = scoreElem.text.trim();
-                if (score.isNotEmpty && score != '-') {
-                  print('[시즌 데이터] ${season['name']} ${rank}위: $score');
-                  return score;  // 성공 시 즉시 반환 (대기 없음)
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        print('[시즌 데이터 오류] ${season['name']} ${rank}위 시도 ${attempt + 1}: $e');
-      }
-      
-      // 마지막 시도가 아니면 1초만 대기 (2초 → 1초)
-      if (attempt < maxAttempts - 1) {
-        await Future.delayed(Duration(seconds: 1));
-      }
-    }
-    
-    return null;  // 실패
-  }
-
-  // ===== 랭킹 데이터 로드 (Nexon 웹 크롤링) =====
-  Future<void> _loadRankingData() async {
-    setState(() {
-      _rankingLoading = true;
-    });
-
-    try {
-      // 감독모드만 고정
-      const rtMode = 'manager';
-      
-      final headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      };
-
-      // ===== 병렬 처리: 3개 요청을 동시에 실행 (3배 속도 향상) =====
-      final url1 = 'https://fconline.nexon.com/datacenter/rank_inner?rt=$rtMode&n4pageno=1';
-      final url2 = 'https://fconline.nexon.com/datacenter/rank_inner?rt=$rtMode&n4pageno=2';
-      final url10 = 'https://fconline.nexon.com/datacenter/rank_inner?rt=$rtMode&n4pageno=10';
-
-      // Future.wait로 동시 실행 - 가장 느린 요청 시간만큼만 대기
-      final responses = await Future.wait([
-        http.get(Uri.parse(url1), headers: headers).timeout(Duration(seconds: 10)),
-        http.get(Uri.parse(url2), headers: headers).timeout(Duration(seconds: 10)),
-        http.get(Uri.parse(url10), headers: headers).timeout(Duration(seconds: 10)),
-      ]);
-
-      final response1 = responses[0];
-      final response2 = responses[1];
-      final response10 = responses[2];
-
-      if (response1.statusCode == 200 && response2.statusCode == 200 && response10.statusCode == 200) {
-        final doc1 = html_parser.parse(response1.body);
-        final doc2 = html_parser.parse(response2.body);
-        final doc10 = html_parser.parse(response10.body);
-
-        // 랭킹 파싱 함수
-        List<Map<String, dynamic>> parseRankings(dom.Document doc) {
-          List<Map<String, dynamic>> rankings = [];
-          final rows = doc.querySelectorAll('.tbody .tr');
-          
-          for (var row in rows) {
-            try {
-              final rankElem = row.querySelector('.rank_no');
-              if (rankElem == null || rankElem.text == '순위') continue;
-              
-              final rank = rankElem.text.trim();
-              final score = row.querySelector('.rank_r_win_point')?.text.trim() ?? '-';
-              final coach = row.querySelector('.rank_coach .name.profile_pointer')?.text.trim() ?? '-';
-              final value = row.querySelector('.rank_coach .price')?.text.trim() ?? '-';
-              
-              // 팀컬러 이미지 URL
-              final teamColorImgs = row.querySelectorAll('.team_color .ico_rank img');
-              final teamColorUrls = teamColorImgs.map((img) => img.attributes['src'] ?? '').where((src) => src.isNotEmpty).toList();
-              
-              // 팀컬러 이름
-              final teamColorTexts = row.querySelectorAll('.team_color .name .inner');
-              final teamColorNames = teamColorTexts.map((text) => text.text.trim()).toList();
-              
-              rankings.add({
-                'rank': rank,
-                'score': score,
-                'coach': coach,
-                'value': value,
-                'team_color_urls': teamColorUrls,
-                'team_color_names': teamColorNames,
-              });
-            } catch (e) {
-              print('[랭킹 파싱 오류] $e');
-              continue;
-            }
-          }
-          
-          return rankings;
-        }
-
-        final top20 = parseRankings(doc1);
-        final next20 = parseRankings(doc2);
-        final allPage10 = parseRankings(doc10);
-        
-        // 190-200위는 페이지 10의 9-19 인덱스
-        final bottom11 = allPage10.length > 9 ? allPage10.sublist(9) : allPage10;
-
-        // 날짜 정보 파싱
-        final rankAdvice = doc1.querySelector('.rank_advice');
-        String dateInfo = '날짜 정보 없음';
-        if (rankAdvice != null) {
-          final dateRegex = RegExp(r'※\s*(\d{4}-\d{2}-\d{2})\s*(\d{2}):\d{2}:\d{2}');
-          final match = dateRegex.firstMatch(rankAdvice.text);
-          if (match != null) {
-            dateInfo = '※ ${match.group(1)} ${match.group(2)}시';
-          }
-        }
-
-        // ===== 컷라인 데이터 (슈챔컷: 16-20위, 주차컷: 196-200위 + 이전 시즌) =====
-        Map<String, dynamic>? cutlines;
-        
-        // 슈챔컷: 16-20위
-        List<Map<String, String>> superChampList = [];
-        if (top20.length >= 20) {
-          for (int i = 15; i < 20; i++) {
-            superChampList.add({
-              'rank': top20[i]['rank'],
-              'score': top20[i]['score'],
-            });
-          }
-        }
-        
-        // 주차컷: 196-200위
-        List<Map<String, String>> parkingList = [];
-        if (allPage10.length >= 20) {
-          for (int i = 15; i < 20; i++) {  // 페이지 10의 16-20번째 = 196-200위
-            parkingList.add({
-              'rank': allPage10[i]['rank'],
-              'score': allPage10[i]['score'],
-            });
-          }
-        }
-
-        // 이전 시즌 목록 가져오기
-        final seasonListUrl = 'https://fconline.nexon.com/datacenter/rank?rt=$rtMode';
-        final seasonResponse = await http.get(Uri.parse(seasonListUrl), headers: headers).timeout(Duration(seconds: 10));
-        
-        List<Map<String, String>> superChampHistory = [];
-        List<Map<String, String>> parkingHistory = [];
-        
-        if (seasonResponse.statusCode == 200) {
-          final seasonDoc = html_parser.parse(seasonResponse.body);
-          final seasonElements = seasonDoc.querySelectorAll('.club_list.selector_list li a[onclick^=ChangeSeason]');
-          
-          List<Map<String, String>> seasons = [];
-          for (var aElem in seasonElements) {
-            final seasonNameElem = aElem.querySelector('span');
-            if (seasonNameElem == null) continue;
-            
-            final seasonNameText = seasonNameElem.text.trim();
-            if (seasonNameText.contains('현재 시즌')) continue;
-            
-            final onclickAttr = aElem.attributes['onclick'] ?? '';
-            final seasonNoMatch = RegExp(r'ChangeSeason\((\d+)\)').firstMatch(onclickAttr);
-            if (seasonNoMatch != null) {
-              final seasonNo = seasonNoMatch.group(1)!;
-              final seasonName = seasonNameText.split(' (')[0];
-              seasons.add({'no': seasonNo, 'name': seasonName});
-              
-              if (seasons.length >= 5) break;
-            }
-          }
-          
-          // ===== 각 시즌의 20위, 200위 점수 가져오기 (병렬 처리로 10배 빠름) =====
-          // 5개 시즌을 동시에 요청 (순차 50초 → 병렬 5초)
-          final seasonFutures = seasons.map((season) async {
-            Map<String, dynamic> result = {'season': season['name']};
-            
-            // 슈챔컷과 주차컷을 병렬로 동시 실행
-            final results = await Future.wait([
-              _fetchSeasonRank(season, rtMode, headers, rank: '20', maxAttempts: 2),
-              _fetchSeasonRank(season, rtMode, headers, rank: '200', page: 10, maxAttempts: 2),
-            ]);
-            
-            result['superScore'] = results[0];
-            result['parkingScore'] = results[1];
-            return result;
-          }).toList();
-          
-          // 모든 시즌 데이터를 동시에 가져오기 (병렬 실행)
-          final seasonResults = await Future.wait(seasonFutures);
-          
-          // 결과 정리
-          for (var result in seasonResults) {
-            if (result['superScore'] != null) {
-              superChampHistory.add({
-                'name': result['season'] as String,
-                'score': result['superScore'] as String,
-              });
-            }
-            if (result['parkingScore'] != null) {
-              parkingHistory.add({
-                'name': result['season'] as String,
-                'score': result['parkingScore'] as String,
-              });
-            }
-          }
-        }
-        
-        cutlines = {
-          'super_champ_cut': {
-            'current': superChampList,
-            'history': superChampHistory,
-          },
-          'parking_cut': {
-            'current': parkingList,
-            'history': parkingHistory,
-          },
-        };
-
-        setState(() {
-          _top40Rankings = [...top20, ...next20];
-          _bottom11Rankings = bottom11;
-          _cutlines = cutlines;
-          _rankingDateInfo = dateInfo;
-          _rankingLoading = false;
-        });
-      } else {
-        throw Exception('HTTP ${response1.statusCode}/${response2.statusCode}/${response10.statusCode}');
-      }
-    } catch (e) {
-      print('[랭킹 로드 오류] $e');
-      setState(() {
-        _rankingLoading = false;
-      });
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('랭킹 데이터 로드 실패: $e')),
-      );
-    }
-  }
-
-  // ===== 랭킹 탭 =====
-  Widget _buildRankingTab() {
-    return RefreshIndicator(
-      onRefresh: _loadRankingData,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 날짜 정보
-            if (_rankingDateInfo.isNotEmpty) ...[
-              Text(
-                _rankingDateInfo,
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ===== 슈챔컷 (16-20위) =====
-            if (_cutlines != null && _cutlines!['super_champ_cut'] != null) ...[
-              Card(
-                elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '슈챔컷 (16-20위)',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 12),
-                      
-                      // 현재 시즌 16-20위 리스트
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? Colors.grey.shade900
-                              : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: const [
-                                Expanded(flex: 1, child: Text('순위', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                                Expanded(flex: 2, child: Text('점수', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                              ],
-                            ),
-                            const Divider(height: 16),
-                            ...(_cutlines!['super_champ_cut']['current'] as List).map((item) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Expanded(flex: 1, child: Text(item['rank'], style: const TextStyle(fontSize: 13))),
-                                    Expanded(flex: 2, child: Text(item['score'], style: const TextStyle(fontSize: 13))),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ],
-                        ),
-                      ),
-                      
-                      // 이전 시즌 데이터
-                      if ((_cutlines!['super_champ_cut']['history'] as List).isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        const Text('이전 시즌 20위 점수', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
-                        const SizedBox(height: 8),
-                        ...(_cutlines!['super_champ_cut']['history'] as List).map((item) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 3),
-                            child: Text(
-                              '${item['name']} : ${item['score']}점',
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          );
-                        }).toList(),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ===== 주차컷 (196-200위) =====
-            if (_cutlines != null && _cutlines!['parking_cut'] != null) ...[
-              Card(
-                elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '주차컷 (196-200위)',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 12),
-                      
-                      // 현재 시즌 196-200위 리스트
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? Colors.grey.shade900
-                              : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: const [
-                                Expanded(flex: 1, child: Text('순위', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                                Expanded(flex: 2, child: Text('점수', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                              ],
-                            ),
-                            const Divider(height: 16),
-                            ...(_cutlines!['parking_cut']['current'] as List).map((item) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    Expanded(flex: 1, child: Text(item['rank'], style: const TextStyle(fontSize: 13))),
-                                    Expanded(flex: 2, child: Text(item['score'], style: const TextStyle(fontSize: 13))),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ],
-                        ),
-                      ),
-                      
-                      // 이전 시즌 데이터
-                      if ((_cutlines!['parking_cut']['history'] as List).isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        const Text('이전 시즌 200위 점수', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey)),
-                        const SizedBox(height: 8),
-                        ...(_cutlines!['parking_cut']['history'] as List).map((item) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 3),
-                            child: Text(
-                              '${item['name']} : ${item['score']}점',
-                              style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            ),
-                          );
-                        }).toList(),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // 1-40위 랭킹
-            const Text('1-40위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            _buildRankingTable(_top40Rankings),
-            const SizedBox(height: 24),
-
-            // 190-200위 랭킹
-            const Text('190-200위', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            _buildRankingTable(_bottom11Rankings),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRankingTable(List<Map<String, dynamic>> rankings) {
-    if (_rankingLoading) {
-      return const Center(child: Padding(
-        padding: EdgeInsets.all(32.0),
-        child: CircularProgressIndicator(),
-      ));
-    }
-
-    if (rankings.isEmpty) {
-      return Center(child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Text(
-          '데이터가 없습니다',
-          style: TextStyle(color: Colors.grey.shade600),
-        ),
-      ));
-    }
-
-    return Table(
-      border: TableBorder.all(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Colors.grey.shade700
-            : Colors.grey.shade300,
-      ),
-      columnWidths: const {
-        0: FixedColumnWidth(50),
-        1: FlexColumnWidth(2),
-        2: FixedColumnWidth(80),
-        3: FixedColumnWidth(100),
-      },
-      children: [
-        // 헤더
-        TableRow(
-          decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.grey.shade800
-                : Colors.grey.shade200,
-          ),
-          children: const [
-            Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('순위', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ),
-            Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('감독명', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ),
-            Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('점수', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ),
-            Padding(
-              padding: EdgeInsets.all(8),
-              child: Text('구단가치', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ),
-          ],
-        ),
-        // 데이터 행
-        ...rankings.map((ranking) {
-          return TableRow(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  ranking['rank'] ?? '',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  ranking['coach'] ?? '',
-                  style: const TextStyle(fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  ranking['score'] ?? '',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(
-                  ranking['value'] ?? '',
-                  style: const TextStyle(fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          );
-        }).toList(),
-      ],
-    );
-  }
 }
 
 /// 최근 경기 도트 위젯 — 자유 스크롤, 보이는 20개 기준 승무패 집계

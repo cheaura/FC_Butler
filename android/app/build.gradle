@@ -27,7 +27,7 @@ def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '
 def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0.0'
 
 android {
-    namespace = "com.fcbutler.app"
+    namespace = "com.panenka.app"
     compileSdk = 36
 
     compileOptions {
@@ -42,7 +42,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.fcbutler.app"
+        applicationId = "com.panenka.app"
         minSdk = 23
         targetSdk = 36
         versionCode = flutterVersionCode.toInteger()

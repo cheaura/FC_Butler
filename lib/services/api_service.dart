@@ -12,63 +12,82 @@ class ApiService {
   static const String baseUrl = 'http://218.146.16.144:5000';
   String? _token;
   String? _username;
+  String? _accountType; // 'macro'=매크로 연동(전체 탭) / 'public'=공개 가입(조회만)
 
   // Token getter
   String? get token => _token;
   String? get username => _username;
+  String? get accountType => _accountType;
+  bool get isMacroAccount => _accountType == 'macro';
+  bool get isLoggedIn => _token != null;
 
   // ===== 자동로그인 체크 (앱 시작 시 호출) =====
+  // 검증은 /api/user/auth/verify 사용 — 계정 유형을 함께 받고,
+  // 서버가 장기 세션을 슬라이딩 연장하므로 계속 쓰면 로그인이 풀리지 않는다.
   Future<Map<String, dynamic>> checkAutoLogin() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedToken = prefs.getString('auth_token');
       final savedUsername = prefs.getString('username');
       final expiryTime = prefs.getInt('token_expiry');
-      
+
       if (savedToken != null && savedUsername != null && expiryTime != null) {
-        // 토큰 만료 시간 체크 (30일)
         final now = DateTime.now().millisecondsSinceEpoch;
         if (now < expiryTime) {
-          // 토큰 유효 - 서버에 토큰 검증 요청
           _token = savedToken;
           _username = savedUsername;
-          
-          // 토큰 유효성 검증 (서버에 간단한 요청)
-          final response = await http.get(
-            Uri.parse('$baseUrl/api/user/dashboard/status'),
+
+          final response = await http.post(
+            Uri.parse('$baseUrl/api/user/auth/verify'),
             headers: {'Authorization': 'Bearer $_token'},
           ).timeout(Duration(seconds: 5));
-          
+
           if (response.statusCode == 200) {
-            return {'success': true, 'username': savedUsername};
+            final data = json.decode(response.body);
+            if (data['valid'] == true) {
+              _accountType = data['account_type'] ?? prefs.getString('account_type') ?? 'macro';
+              await prefs.setString('account_type', _accountType!);
+              // 로컬 만료 시각도 갱신 (서버 세션이 연장되므로 30일 재연장)
+              await prefs.setInt('token_expiry',
+                  DateTime.now().add(Duration(days: 30)).millisecondsSinceEpoch);
+              return {
+                'success': true,
+                'username': savedUsername,
+                'account_type': _accountType,
+              };
+            }
           }
         }
       }
-      
+
       // 자동로그인 실패 - 저장된 정보 삭제
       await clearAutoLogin();
       return {'success': false};
-      
+
     } catch (e) {
       print('[자동로그인 체크 오류] $e');
-      await clearAutoLogin();
-      return {'success': false};
+      // 네트워크 일시 오류로 저장된 로그인을 지우지 않도록: 로컬 만료 내라면 보류
+      return {'success': false, 'network_error': true};
     }
   }
 
   // ===== 자동로그인 정보 저장 =====
-  Future<void> saveAutoLogin(String token, String username) async {
+  Future<void> saveAutoLogin(String token, String username, [String? accountType]) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final expiryTime = DateTime.now().add(Duration(days: 30)).millisecondsSinceEpoch;
-      
+
       await prefs.setString('auth_token', token);
       await prefs.setString('username', username);
       await prefs.setInt('token_expiry', expiryTime);
-      
+      if (accountType != null) {
+        await prefs.setString('account_type', accountType);
+      }
+
       _token = token;
       _username = username;
-      
+      if (accountType != null) _accountType = accountType;
+
       print('[자동로그인] 저장 완료: $username (만료: 30일 후)');
     } catch (e) {
       print('[자동로그인 저장 오류] $e');
@@ -82,14 +101,68 @@ class ApiService {
       await prefs.remove('auth_token');
       await prefs.remove('username');
       await prefs.remove('token_expiry');
-      
+      await prefs.remove('account_type');
+
       // 로그아웃이므로 메모리 토큰도 삭제
       _token = null;
       _username = null;
-      
+      _accountType = null;
+
       print('[로그아웃] 모든 인증 정보 삭제 완료');
     } catch (e) {
       print('[자동로그인 삭제 오류] $e');
+    }
+  }
+
+  // ===== 공개 회원가입 (즉시 활성 — 조회 계정) =====
+  Future<Map<String, dynamic>> register(String username, String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'username': username,
+          'password': password,
+          'agree_terms': true, // 가입 화면에서 동의 체크 후에만 호출됨
+        }),
+      ).timeout(Duration(seconds: 10));
+
+      final data = json.decode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        _token = data['token'];
+        _username = data['username'];
+        _accountType = data['account_type'] ?? 'public';
+        await saveAutoLogin(_token!, _username!, _accountType);
+        return {'success': true, 'username': _username, 'account_type': _accountType};
+      }
+      return {'success': false, 'message': data['message'] ?? '가입에 실패했습니다.'};
+    } catch (e) {
+      print('[API] 회원가입 오류: $e');
+      return {'success': false, 'message': '서버 연결 오류'};
+    }
+  }
+
+  // ===== 인앱 계정 삭제 (탈퇴 — 스토어 정책 의무) =====
+  Future<Map<String, dynamic>> deleteAccount(String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/auth/delete-account'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+        body: json.encode({'password': password}),
+      ).timeout(Duration(seconds: 10));
+
+      final data = json.decode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        await clearAutoLogin();
+        return {'success': true};
+      }
+      return {'success': false, 'message': data['message'] ?? '계정 삭제에 실패했습니다.'};
+    } catch (e) {
+      print('[API] 계정 삭제 오류: $e');
+      return {'success': false, 'message': '서버 연결 오류'};
     }
   }
 
@@ -113,15 +186,16 @@ class ApiService {
       if (response.statusCode == 200 && data['success'] == true) {
         _token = data['token'];
         _username = username;
-        print('[API] 토큰 설정 완료: ${_token != null ? "있음" : "없음"}, username: $_username');
-        
+        _accountType = data['account_type'] ?? 'macro';
+        print('[API] 토큰 설정 완료: ${_token != null ? "있음" : "없음"}, username: $_username, type: $_accountType');
+
         // 자동로그인 체크 시에만 SharedPreferences에 저장
         if (rememberMe) {
-          await saveAutoLogin(data['token'], username);
+          await saveAutoLogin(data['token'], username, _accountType);
           print('[API] 자동로그인 정보 저장 완료');
         }
         // 자동로그인 체크 안 함 → 아무것도 하지 않음 (SharedPreferences에 저장 안 함)
-        
+
         // 로그인 성공 후 FCM 토큰 전송 (자동/수동 모두)
         try {
           await FCMService().sendTokenToServerWithAuth(data['token']);
@@ -129,8 +203,8 @@ class ApiService {
         } catch (e) {
           print('[API] FCM 토큰 전송 실패: $e');
         }
-        
-        return {'success': true, 'username': username};
+
+        return {'success': true, 'username': username, 'account_type': _accountType};
       } else {
         return {
           'success': false,

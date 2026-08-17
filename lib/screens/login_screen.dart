@@ -1,7 +1,9 @@
 ﻿import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/fcm_service.dart';
-import 'dashboard_screen.dart';
+import 'public_home_screen.dart';
+import '../widgets/panenka_logo.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -44,14 +46,22 @@ class _LoginScreenState extends State<LoginScreen> {
         // 실제 기기에서는 정상 작동함
         print('[로그인] FCM 토큰 전송 실패 (시뮬레이터 또는 권한 없음): $e');
       }
-      
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) =>
-              DashboardScreen(username: result['username'], apiService: _apiService),
-        ),
-      );
+
+      // 계정 유형별 라우팅: 매크로 연동 계정은 탭 셸의 매크로 탭에서 시작
+      if (result['account_type'] == 'macro') {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const PublicHomeScreen(
+                initialIndex: PublicHomeScreen.macroTabIndex),
+          ),
+          (route) => false,
+        );
+      } else {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const PublicHomeScreen()),
+          (route) => false,
+        );
+      }
     } else {
       setState(() {
         _errorMessage = result['message'];
@@ -67,7 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF1a237e), Color(0xFF0d47a1)],
+            colors: [Color(0xFF2A1B54), Color(0xFF100F1A)],
           ),
         ),
         child: SafeArea(
@@ -77,14 +87,10 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.sports_soccer,
-                    size: 80,
-                    color: Colors.white,
-                  ),
+                  const PanenkaLogo(size: 80),
                   const SizedBox(height: 32),
                   const Text(
-                    'FC Butler',
+                    'Panenka',
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
@@ -200,10 +206,41 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF1a237e),
+                                color: Color(0xFF7C3AED),
                               ),
                             ),
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (context) => const SignupScreen()),
+                          );
+                        },
+                        child: const Text('회원가입',
+                            style: TextStyle(color: Colors.white)),
+                      ),
+                      const Text('|',
+                          style: TextStyle(color: Colors.white30)),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                                builder: (context) =>
+                                    const PublicHomeScreen()),
+                            (route) => false,
+                          );
+                        },
+                        child: const Text('로그인 없이 둘러보기',
+                            style: TextStyle(color: Colors.white70)),
+                      ),
+                    ],
                   ),
                 ],
               ),
