@@ -60,10 +60,10 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDRA7mSfx0qMGw4ecBaOeBn0fqu7DzeBIQ',
-    appId: '1:861190368108:ios:7f510ccfbc07bdd4d16149',
+    appId: '1:861190368108:ios:42a781f5622c2e7bd16149',
     messagingSenderId: '861190368108',
     projectId: 'dd-fconline4',
     storageBucket: 'dd-fconline4.firebasestorage.app',
-    iosBundleId: 'com.panenka.app',
+    iosBundleId: 'com.panenka9.app',
   );
 }
