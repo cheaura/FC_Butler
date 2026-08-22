@@ -1,40 +1,20 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'api_service.dart';
+import 'player_meta_store.dart';
 
-/// 신규특성 캐시 — 시즌 카드(spid) 단위, 앱 전역 공유 (웹 squad.js traitsCache 이식).
-/// 같은 선수라도 시즌 카드마다 특성이 다르므로 spid 단위로 조회·캐시한다.
+/// 신규특성 캐시 — 시즌 카드(spid) 단위, 앱 전역 공유.
+///
+/// 2026-08-22 (스쿼드 B안): 실제 저장소는 [PlayerMetaStore](sqflite 영구 캐시 + 서버 묶음 API).
+/// 구 구현은 `success:false`를 빈 특성으로 영구 캐시해 레이트리밋 초과 시 신규특성이
+/// 사라지는 버그가 있었다 — 이제 실패 응답은 캐시하지 않고 다음 진입 때 재시도한다.
+/// 기존 호출부(squad_tab·search_tab·match_detail·player_field_card) 호환을 위해 API 유지.
 class TraitStore {
-  static final Map<String, List<Map<String, dynamic>>> _cache = {};
-  static final Map<String, Future<void>> _pending = {};
-
   /// 캐시된 신규특성 목록 (미조회면 null, 조회 후 없으면 빈 목록)
   static List<Map<String, dynamic>>? cached(num? spid) =>
-      spid == null ? null : _cache['${spid.toInt()}'];
+      PlayerMetaStore.cachedNewTraits(spid);
 
   /// 조회 보장 — 완료 시 Future 완료 (위젯에서 then(setState)로 반영)
-  static Future<void> ensure(num? spid) {
-    if (spid == null) return Future.value();
-    final key = '${spid.toInt()}';
-    if (_cache.containsKey(key)) return Future.value();
-    return _pending.putIfAbsent(key, () async {
-      try {
-        final r = await http
-            .get(Uri.parse(
-                '${ApiService.baseUrl}/api/user/squad/traits?spid=$key'))
-            .timeout(const Duration(seconds: 20));
-        final d = json.decode(r.body);
-        _cache[key] = (d['success'] == true)
-            ? (d['traits'] as List? ?? [])
-                .where((t) => t is Map && t['is_new'] == true)
-                .map((t) => Map<String, dynamic>.from(t as Map))
-                .toList()
-            : <Map<String, dynamic>>[];
-      } catch (_) {
-        // 실패 시 캐시하지 않음 — 다음 진입 때 재시도
-      } finally {
-        _pending.remove(key);
-      }
-    });
-  }
+  static Future<void> ensure(num? spid) => PlayerMetaStore.ensure(spid);
+
+  /// 여러 카드를 한 번에 (스쿼드·라인업 11명 → 서버 호출 1회)
+  static Future<void> ensureAll(Iterable<num?> spids) =>
+      PlayerMetaStore.ensureAll(spids);
 }

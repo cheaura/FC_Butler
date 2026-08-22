@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../screens/training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/recent_search_store.dart';
@@ -1138,6 +1139,20 @@ class _SearchTabState extends State<SearchTab>
                         name: '${p['name']}',
                         grade: (p['grade'] as num? ?? 1).toInt(),
                         seasonFallback: p['season']?.toString(),
+                        // 카드 탭 → 집훈 계산기 (2026-08-22)
+                        onTap: spid == null
+                            ? null
+                            : () => Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => TrainingCalcScreen(
+                                    spid: spid,
+                                    name: '${p['name']}',
+                                    grade: (p['grade'] as num? ?? 1).toInt(),
+                                    role: role,
+                                    faceUrl:
+                                        'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png',
+                                    season: p['season']?.toString(),
+                                  ),
+                                )),
                       ),
                     );
                   }),

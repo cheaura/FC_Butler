@@ -11,10 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/trait_store.dart';
+import '../services/player_meta_store.dart';
 import '../utils/fc_format.dart';
 import 'badges.dart';
 import 'pill_tabs.dart';
 import 'player_field_card.dart';
+import '../screens/training_calc_screen.dart';
 
 /// 스쿼드 탭 — 스쿼드메이커 (2026-08-19 웹 대시보드 완전 동일화, 사용자 확정).
 /// 웹 static/user/squad.js 기능 이식:
@@ -149,16 +151,22 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     return int.tryParse(vals[spPos].trim()) ?? 0;
   }
 
-  /// 최종 OVR: 서버 계산값 우선, 없으면 로컬 근사(팀컬러 제외)
+  /// 최종 OVR = eachOvr[포지션] + 강화 + 적응도 + 팀컬러 '전체 능력치' 보너스
+  /// (넥슨 스쿼드메이커 공식 실측과 동일 — B안: 기기 계산, 서버 ovr_by_spid는 폴백)
   int? _slotOvr(_Slot slot) {
     final p = slot.player;
     if (p == null) return null;
     final spid = (p['spid'] as num).toInt();
-    final calcOvr = (_tcCalc?['ovr_by_spid'] as Map?)?['$spid'];
-    if (calcOvr is num) return calcOvr.toInt();
     final base = _eachOvrAt(p, slot.spPos);
-    if (base == 0) return null;
-    return base + (kGradeBonus[slot.grade] ?? 0) + (kAdapBonus[_adap] ?? 0);
+    if (base == 0) {
+      final calcOvr = (_tcCalc?['ovr_by_spid'] as Map?)?['$spid'];
+      return calcOvr is num ? calcOvr.toInt() : null;
+    }
+    final tcBonus = (_tcCalc?['tc_bonus_by_spid'] as Map?)?['$spid'];
+    return base +
+        (kGradeBonus[slot.grade] ?? 0) +
+        (kAdapBonus[_adap] ?? 0) +
+        (tcBonus is num ? tcBonus.toInt() : 0);
   }
 
   /// 같은 선수의 시즌 카드들은 pid(선수 고유번호)가 동일 — spid 뒤 6자리
@@ -231,39 +239,55 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     return null;
   }
 
-  /// 선수 필드(급여·eachOvr·시세) 확보 후 같은 spid 슬롯에 병합
-  Future<void> _ensureFields(int spid) async {
-    if (!_fields.containsKey(spid)) {
-      try {
-        final r = await http.get(
-          Uri.parse('${ApiService.baseUrl}/api/user/squad/player-fields'
-              '?spid=$spid'),
-        ).timeout(const Duration(seconds: 25));
-        final d = json.decode(r.body);
-        if (d['success'] == true) {
-          _fields[spid] = Map<String, dynamic>.from(d);
-        }
-      } catch (e) {
-        print('[SquadTab] 선수 필드($spid) 조회 실패: $e');
-      }
-    }
-    final f = _fields[spid];
-    if (f == null) return;
+  /// 선수 필드(급여·eachOvr·시세·특성) 확보 후 같은 spid 슬롯에 병합
+  /// — B안: PlayerMetaStore(기기 영구 캐시 → 서버 player-bulk 1회)
+  Future<void> _ensureFields(int spid) => _ensureFieldsAll([spid]);
+
+  /// 여러 카드를 한 번에 확보 (스쿼드 11명 → 서버 호출 1회)
+  Future<void> _ensureFieldsAll(Iterable<int> spids) async {
+    final ids = spids.toSet().toList();
+    if (ids.isEmpty) return;
+    await PlayerMetaStore.ensureAll(ids, freshPrice: true);
     var changed = false;
     for (final s in _slots) {
       final p = s.player;
-      if (p != null && (p['spid'] as num).toInt() == spid) {
-        p['pay'] ??= f['pay'];
-        if ((p['eachOvr']?.toString() ?? '').isEmpty) {
-          p['eachOvr'] = f['each_ovr'];
-        }
-        if ((p['eachPrice']?.toString() ?? '').isEmpty) {
-          p['eachPrice'] = f['each_price'];
-        }
+      if (p == null) continue;
+      final spid = (p['spid'] as num).toInt();
+      if (!ids.contains(spid)) continue;
+      final f = PlayerMetaStore.cached(spid);
+      if (f == null) continue;
+      _fields[spid] = f;
+      if (_mergeMeta(p, f)) changed = true;
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  /// 서버 메타(each_ovr 형식)를 슬롯 선수 dict(eachOvr 형식)에 병합. 변경 시 true.
+  static bool _mergeMeta(Map<String, dynamic> p, Map<String, dynamic> f) {
+    var changed = false;
+    void put(String key, dynamic v) {
+      if (v == null) return;
+      if (p[key] == null || (p[key]?.toString() ?? '').isEmpty) {
+        p[key] = v;
         changed = true;
       }
     }
-    if (changed && mounted) setState(() {});
+    put('pay', f['pay']);
+    put('eachOvr', f['each_ovr']);
+    put('face_url', f['face_url']);
+    put('season', f['season_img']);
+    put('position', f['position']);
+    final price = PlayerMetaStore.cachedPrice(p['spid'] as num?) ?? f['each_price'];
+    if (price != null && (price.toString()).isNotEmpty) {
+      if (p['eachPrice']?.toString() != price.toString()) {
+        p['eachPrice'] = price;
+        changed = true;
+      }
+    }
+    if (f['teamcolors'] is List) {
+      p['teamcolors'] = f['teamcolors'];
+    }
+    return changed;
   }
 
   // ── 팀컬러 계산 (디바운스 + 순번 가드 — 웹 requestCalc 이식) ──
@@ -331,15 +355,14 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   /// 랭커픽 카드 배치 (부분 메타 → player-fields로 보강, 검증된 기존 방식 재사용)
   bool _placePick(int idx, Map<String, dynamic> pick) {
-    return _placePlayer(
-        idx,
-        {
-          'spid': pick['spid'],
-          'name': pick['name'],
-          'season': pick['season'],
-          'face_url': pick['face_url'],
-        },
-        (pick['grade'] as num? ?? 1).toInt());
+    final player = <String, dynamic>{
+      'spid': pick['spid'],
+      'name': pick['name'],
+      'season': pick['season'],
+      'face_url': pick['face_url'],
+    };
+    _mergeMeta(player, pick); // 동봉 메타(pay·each_ovr·특성)가 있으면 즉시 반영
+    return _placePlayer(idx, player, (pick['grade'] as num? ?? 1).toInt());
   }
 
   // ── 랭커 스쿼드 생성 (기존 검증 로직 유지) ──
@@ -363,6 +386,11 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       final picksByPos = <String, List<dynamic>>{};
       (data['picks_by_position'] as Map<String, dynamic>? ?? {})
           .forEach((k, v) => picksByPos[k] = v as List<dynamic>);
+      // B안: 동봉된 메타(마스터DB 보유분)를 기기 캐시에 반영
+      await PlayerMetaStore.absorb(picksByPos.values
+          .expand((l) => l)
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m)));
 
       // 실사용 포지션 상위 11자리 재구성 (웹 buildSlotsFromRankerPicks와 동일)
       final entries = picksByPos.entries.map((e) {
@@ -394,6 +422,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             'season': p['season'],
             'face_url': p['face_url'],
           };
+          _mergeMeta(slot.player!, Map<String, dynamic>.from(p));
           slot.grade = (p['grade'] as num? ?? 1).toInt();
           used.add(spid);
           break;
@@ -419,13 +448,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  /// 배치된 슬롯들의 급여·eachOvr·시세 확보 (4개씩 병렬) 후 팀컬러 계산
+  /// 배치된 슬롯들의 급여·eachOvr·시세·특성 확보 (묶음 1회) 후 팀컬러 계산
   Future<void> _enrichSlots() async {
-    final picks = _filled;
-    for (var i = 0; i < picks.length; i += 4) {
-      await Future.wait(picks.skip(i).take(4).map(
-          (s) => _ensureFields((s.player!['spid'] as num).toInt())));
-    }
+    await _ensureFieldsAll(
+        _filled.map((s) => (s.player!['spid'] as num).toInt()));
     _scheduleCalc();
   }
 
@@ -460,10 +486,21 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         _customLabel = '$name의 스쿼드 ($_formation)';
         _tcCalc = null;
       });
-      // 선수별 전체 메타(eachOvr·시세·얼굴)를 순차 확보해 배치 (웹과 동일)
+      // B안: 서버가 동봉한 메타(pay·each_ovr·특성)를 바로 사용 — 11회 검색 제거
+      await PlayerMetaStore.absorb(rows);
       var missed = 0;
       for (var i = 0; i < rows.length && i < _slots.length; i++) {
         final pd = rows[i];
+        if ((pd['each_ovr']?.toString() ?? '').isNotEmpty) {
+          final player = <String, dynamic>{
+            'spid': pd['spid'],
+            'name': pd['name'],
+          };
+          _mergeMeta(player, pd);
+          _slots[i].player = player;
+          continue;
+        }
+        // 동봉 실패 카드만 기존 검색 폴백 (검증된 방식)
         final players = await _searchPlayers(pd['name']?.toString() ?? '');
         final found = (players ?? [])
             .where((c) => '${c['spid']}' == '${pd['spid']}')
@@ -474,8 +511,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         } else {
           missed++;
         }
-        if (mounted) setState(() {});
       }
+      if (mounted) setState(() {});
+      // 시세(30분)·누락 특성 보강
+      _enrichSlots();
       if (missed > 0 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('$missed명은 선수 정보를 찾지 못해 비워뒀습니다.')));
@@ -1038,6 +1077,28 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                // 집훈 계산기 (2026-08-22, A안) — 이 카드의 세부 능력치로 OVR 시뮬레이션
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.of(this.context).push(MaterialPageRoute(
+                        builder: (_) => TrainingCalcScreen(
+                          spid: (p['spid'] as num).toInt(),
+                          name: '${p['name'] ?? ''}',
+                          grade: slot.grade,
+                          role: slot.role,
+                          faceUrl: p['face_url']?.toString(),
+                          season: p['season']?.toString(),
+                        ),
+                      ));
+                    },
+                    icon: const Icon(Icons.fitness_center, size: 16),
+                    label: const Text('집훈 계산기'),
+                  ),
                 ),
               ],
             ),

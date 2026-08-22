@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../widgets/badges.dart';
@@ -650,6 +651,28 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
           controller: controller,
           padding: const EdgeInsets.all(20),
           children: [
+            // 집훈 계산기 진입 (2026-08-22)
+            if (p['spid'] != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.of(this.context).push(MaterialPageRoute(
+                      builder: (_) => TrainingCalcScreen(
+                        spid: (p['spid'] as num).toInt(),
+                        name: '${p['name']}',
+                        grade: (p['grade'] as num? ?? 1).toInt(),
+                        role: kSpposRole[(p['position'] as num?)?.toInt() ?? 25] ?? 'st',
+                        faceUrl: p['face_url']?.toString(),
+                        season: p['season']?.toString(),
+                      ),
+                    ));
+                  },
+                  icon: const Icon(Icons.fitness_center, size: 16),
+                  label: const Text('집훈 계산기'),
+                ),
+              ),
             Row(
               children: [
                 ClipOval(
