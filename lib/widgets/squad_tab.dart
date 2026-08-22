@@ -547,8 +547,14 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       if (!mounted || seq != _calcSeq) return; // 이후 요청이 있으면 무시
       if (d['success'] == true) {
         setState(() {
+          // 사용자가 바꿔둔 배정은 (그 팀컬러가 여전히 발동 중이고 그 선수가 후보면) 유지, 나머지만 넥슨 기본
+          final prev = Map<String, int>.from(_assign);
           _tcCalc = Map<String, dynamic>.from(d);
           _resetAssignToNexon();
+          prev.forEach((sp, tid) {
+            final f = _featureById(tid);
+            if (f != null && (f['candidates'] as List? ?? []).map((c) => '$c').contains(sp)) _assign[sp] = tid;
+          });
         });
       }
     } catch (e) {
