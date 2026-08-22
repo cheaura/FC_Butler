@@ -299,7 +299,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
           ),
           if (_results.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text('카드를 고르세요 (시즌 · 주포지션 · 1강 OVR)', style: TextStyle(fontSize: 11.5, color: muted)),
+            Text('카드를 고르세요 (시즌 · 주포지션 · 기본 OVR)', style: TextStyle(fontSize: 11.5, color: muted)),
             const SizedBox(height: 4),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 260),
