@@ -4,6 +4,8 @@ import '../constants/legal_texts.dart';
 import '../providers/theme_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/signup_screen.dart';
+import '../screens/feedback_screen.dart';
+import '../services/error_reporter.dart';
 import '../services/api_service.dart';
 
 /// 더보기 탭 — 계정(로그인/로그아웃/계정삭제) · 테마 · 약관/방침 · 앱 정보 · 고지 문구.
@@ -18,7 +20,7 @@ class MoreTab extends StatefulWidget {
 
 class _MoreTabState extends State<MoreTab> {
   final _apiService = ApiService();
-  static const String _appVersion = '1.0.2';
+  String get _appVersion => ErrorReporter.appVersion.isNotEmpty ? ErrorReporter.appVersion : '1.0.4';
 
   Color get _accent => Theme.of(context).colorScheme.primary;
   Color get _subColor => Colors.grey.shade500;
@@ -213,6 +215,15 @@ class _MoreTabState extends State<MoreTab> {
               }),
             ),
           const SizedBox(height: 8),
+          // 버그 제보·건의 (1.0.4)
+          _menuRow(
+            icon: Icons.bug_report_outlined,
+            title: '버그 제보·건의',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const FeedbackScreen()),
+            ),
+          ),
           // 설정
           _menuRow(
             icon: themeProvider.isDarkMode

@@ -76,9 +76,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   Color get _accent => Theme.of(context).colorScheme.primary;
   Color get _subColor => Colors.grey.shade500;
-  Color get _rose => Theme.of(context).brightness == Brightness.dark
-      ? const Color(0xFFE58AA8)
-      : const Color(0xFFD1567F);
+  Color get _rose =>
+      Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE58AA8) : const Color(0xFFD1567F);
 
   @override
   void initState() {
@@ -96,9 +95,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   // ── 슬롯/포메이션 (웹 buildSlots 이식) ──
   void _buildSlots(String formation, {required bool keepPlayers}) {
     final roles = kFormations[formation] ?? kFormations['4-3-3']!;
-    final prev = keepPlayers
-        ? _slots.where((s) => s.player != null).toList()
-        : <_Slot>[];
+    final prev = keepPlayers ? _slots.where((s) => s.player != null).toList() : <_Slot>[];
     final used = <int>{};
     _slots = roles.map((role) {
       final slot = _Slot(role, kRoleSppos[role] ?? 25);
@@ -151,6 +148,130 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     return int.tryParse(vals[spPos].trim()) ?? 0;
   }
 
+  // ── 팀컬러 (1.0.4, 2-A): 카드 시트 목록 · 검색/랭커픽 일치 표시·필터 ──
+  /// 현재 스쿼드에서 발동 중인 팀컬러 id (SquadSetTeamColorInfo 응답 키 = tc_id)
+  Set<String> _activeTcIds() {
+    final out = <String>{};
+    final tc = _tcCalc?['total_team_color'];
+    if (tc is Map) {
+      for (final sec in ['affiliation', 'feature', 'enhance']) {
+        final m = tc[sec];
+        if (m is Map) out.addAll(m.keys.map((k) => '$k'));
+      }
+    }
+    return out;
+  }
+
+  /// 비교 기준: 발동 중인 팀컬러 → 없으면 배치된 카드들의 팀컬러 합집합
+  Set<String> _squadTcIds() {
+    final active = _activeTcIds();
+    if (active.isNotEmpty) return active;
+    final out = <String>{};
+    for (final s in _filled) {
+      final list = PlayerMetaStore.cached(s.player!['spid'] as num?)?['teamcolors'];
+      if (list is List) {
+        for (final t in list) {
+          if (t is Map) out.add('${t['tc_id']}');
+        }
+      }
+    }
+    return out;
+  }
+
+  List<Map<String, dynamic>> _cardTcList(num? spid) {
+    final list = PlayerMetaStore.cached(spid)?['teamcolors'];
+    return list is List ? list.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList() : const [];
+  }
+
+  /// 카드의 팀컬러 중 내 스쿼드와 일치하는 것 (미조회면 null)
+  List<Map<String, dynamic>>? _tcMatches(num? spid) {
+    if (PlayerMetaStore.cached(spid) == null) return null;
+    final mine = _squadTcIds();
+    return _cardTcList(spid).where((t) => mine.contains('${t['tc_id']}')).toList();
+  }
+
+  bool _tcFilterOn = false;
+
+  /// 목록 행 아래 일치 표시 ("● 대한민국 · 스퍼스 영혼의 콤비" / "○ 일치 없음")
+  Widget _tcMatchLine(num? spid) {
+    final m = _tcMatches(spid);
+    if (m == null) return const SizedBox.shrink();
+    final good = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    if (m.isEmpty) return Text('○ 일치 없음', style: TextStyle(fontSize: 10.5, color: _subColor));
+    final names = m.take(3).map((t) => '${t['name']}').join(' · ');
+    return Text('● $names${m.length > 3 ? ' 외 ${m.length - 3}' : ''}',
+        style: TextStyle(fontSize: 10.5, color: good, fontWeight: FontWeight.w700),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis);
+  }
+
+  /// 필터 토글 행 (검색·랭커픽 시트 공통)
+  Widget _tcFilterRow(StateSetter setSheet) {
+    return Row(
+      children: [
+        Switch(
+          value: _tcFilterOn,
+          onChanged: (v) => setSheet(() => setState(() => _tcFilterOn = v)),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text('내 스쿼드 팀컬러와 맞는 카드만', style: TextStyle(fontSize: 12, color: _tcFilterOn ? null : _subColor)),
+        ),
+      ],
+    );
+  }
+
+  /// 카드 시트용 팀컬러 칩 목록 (국가 파랑 · 클럽 주황 · 특성 보라 · 발동 중 초록)
+  Widget _tcChips(num? spid) {
+    final list = _cardTcList(spid);
+    if (list.isEmpty) return const SizedBox.shrink();
+    final active = _activeTcIds();
+    final good = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    Color kindColor(String kind) {
+      switch (kind) {
+        case 'nation':
+          return const Color(0xFF60A5FA);
+        case 'club':
+          return const Color(0xFFF59E0B);
+        default:
+          return const Color(0xFFA78BFA);
+      }
+    }
+
+    final on = list.where((t) => active.contains('${t['tc_id']}')).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('팀컬러 ${list.length}개${on > 0 ? ' · 현재 스쿼드 발동 $on' : ''}',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _subColor)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 5,
+          runSpacing: 5,
+          children: [
+            for (final t in list)
+              Builder(builder: (_) {
+                final isOn = active.contains('${t['tc_id']}');
+                final c = isOn ? good : kindColor('${t['kind']}');
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: c.withOpacity(isOn ? 1 : .6)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text('${t['name']}',
+                      style: TextStyle(fontSize: 10.5, color: c, fontWeight: isOn ? FontWeight.w700 : FontWeight.w500)),
+                );
+              }),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text('파랑 국가 · 주황 클럽 · 보라 특성 · 초록 지금 발동 중', style: TextStyle(fontSize: 10, color: _subColor)),
+      ],
+    );
+  }
+
   /// 최종 OVR = eachOvr[포지션] + 강화 + 적응도 + 팀컬러 '전체 능력치' 보너스
   /// (넥슨 스쿼드메이커 공식 실측과 동일 — B안: 기기 계산, 서버 ovr_by_spid는 폴백)
   int? _slotOvr(_Slot slot) {
@@ -163,10 +284,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       return calcOvr is num ? calcOvr.toInt() : null;
     }
     final tcBonus = (_tcCalc?['tc_bonus_by_spid'] as Map?)?['$spid'];
-    return base +
-        (kGradeBonus[slot.grade] ?? 0) +
-        (kAdapBonus[_adap] ?? 0) +
-        (tcBonus is num ? tcBonus.toInt() : 0);
+    return base + (kGradeBonus[slot.grade] ?? 0) + (kAdapBonus[_adap] ?? 0) + (tcBonus is num ? tcBonus.toInt() : 0);
   }
 
   /// 같은 선수의 시즌 카드들은 pid(선수 고유번호)가 동일 — spid 뒤 6자리
@@ -188,24 +306,22 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       _error = null;
     });
     try {
-      final response = await http.get(
-        Uri.parse('${ApiService.baseUrl}/api/user/squad/ranker-meta'
-            '?mode=$_mode&top=$_top'),
-      ).timeout(const Duration(seconds: 20));
+      final response = await http
+          .get(
+            Uri.parse('${ApiService.baseUrl}/api/user/squad/ranker-meta'
+                '?mode=$_mode&top=$_top'),
+          )
+          .timeout(const Duration(seconds: 20));
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
         setState(() {
           _meta = data;
           // 조건 목록이 바뀌면 기존 선택이 목록에 없을 수 있음 → 초기화
-          final tcs = (data['teamcolors'] as List? ?? [])
-              .map((t) => t['name'] as String)
-              .toSet();
+          final tcs = (data['teamcolors'] as List? ?? []).map((t) => t['name'] as String).toSet();
           if (_teamcolor.isNotEmpty && !tcs.contains(_teamcolor)) {
             _teamcolor = '';
           }
-          final fms = (data['formations'] as List? ?? [])
-              .map((f) => f['name'] as String)
-              .toSet();
+          final fms = (data['formations'] as List? ?? []).map((f) => f['name'] as String).toSet();
           if (_formationCond.isNotEmpty && !fms.contains(_formationCond)) {
             _formationCond = '';
           }
@@ -223,15 +339,15 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   /// 선수명 검색 (/players — 전체 메타)
   Future<List<Map<String, dynamic>>?> _searchPlayers(String name) async {
     try {
-      final r = await http.get(
-        Uri.parse('${ApiService.baseUrl}/api/user/squad/players'
-            '?name=${Uri.encodeComponent(name)}'),
-      ).timeout(const Duration(seconds: 25));
+      final r = await http
+          .get(
+            Uri.parse('${ApiService.baseUrl}/api/user/squad/players'
+                '?name=${Uri.encodeComponent(name)}'),
+          )
+          .timeout(const Duration(seconds: 25));
       final d = json.decode(r.body);
       if (d['success'] == true) {
-        return (d['players'] as List? ?? [])
-            .map((p) => Map<String, dynamic>.from(p))
-            .toList();
+        return (d['players'] as List? ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
       }
     } catch (e) {
       print('[SquadTab] 선수 검색($name) 실패: $e');
@@ -272,6 +388,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         changed = true;
       }
     }
+
     put('pay', f['pay']);
     put('eachOvr', f['each_ovr']);
     put('face_url', f['face_url']);
@@ -334,13 +451,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   // ── 배치 ──
   bool _placePlayer(int idx, Map<String, dynamic> player, int grade) {
-    final dup = _slots.asMap().entries.any((e) =>
-        e.key != idx &&
-        e.value.player != null &&
-        '${e.value.player!['spid']}' == '${player['spid']}');
+    final dup = _slots
+        .asMap()
+        .entries
+        .any((e) => e.key != idx && e.value.player != null && '${e.value.player!['spid']}' == '${player['spid']}');
     if (dup) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('이미 배치된 선수입니다.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미 배치된 선수입니다.')));
       return false;
     }
     setState(() {
@@ -372,25 +488,24 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       _error = null;
     });
     try {
-      final response = await http.get(
-        Uri.parse('${ApiService.baseUrl}/api/user/squad/ranker-squad'
-            '?mode=$_mode&top=$_top'
-            '&teamcolor=${Uri.encodeComponent(_teamcolor)}'
-            '&formation=${Uri.encodeComponent(_formationCond)}'),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .get(
+            Uri.parse('${ApiService.baseUrl}/api/user/squad/ranker-squad'
+                '?mode=$_mode&top=$_top'
+                '&teamcolor=${Uri.encodeComponent(_teamcolor)}'
+                '&formation=${Uri.encodeComponent(_formationCond)}'),
+          )
+          .timeout(const Duration(seconds: 30));
       final data = json.decode(response.body);
       if (response.statusCode != 200 || data['success'] != true) {
         setState(() => _error = data['message'] ?? '랭커 스쿼드 조회에 실패했습니다.');
         return;
       }
       final picksByPos = <String, List<dynamic>>{};
-      (data['picks_by_position'] as Map<String, dynamic>? ?? {})
-          .forEach((k, v) => picksByPos[k] = v as List<dynamic>);
+      (data['picks_by_position'] as Map<String, dynamic>? ?? {}).forEach((k, v) => picksByPos[k] = v as List<dynamic>);
       // B안: 동봉된 메타(마스터DB 보유분)를 기기 캐시에 반영
-      await PlayerMetaStore.absorb(picksByPos.values
-          .expand((l) => l)
-          .whereType<Map>()
-          .map((m) => Map<String, dynamic>.from(m)));
+      await PlayerMetaStore.absorb(
+          picksByPos.values.expand((l) => l).whereType<Map>().map((m) => Map<String, dynamic>.from(m)));
 
       // 실사용 포지션 상위 11자리 재구성 (웹 buildSlotsFromRankerPicks와 동일)
       final entries = picksByPos.entries.map((e) {
@@ -403,8 +518,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         ..sort((a, b) => b.value.compareTo(a.value));
       final positions = entries.take(11).map((e) => e.key).toList()..sort();
       if (positions.length < 11) {
-        setState(() => _error =
-            '조건에 맞는 데이터가 부족합니다. 조건을 넓혀보세요. (팀컬러/포메이션 전체 등)');
+        setState(() => _error = '조건에 맞는 데이터가 부족합니다. 조건을 넓혀보세요. (팀컬러/포메이션 전체 등)');
         return;
       }
 
@@ -450,8 +564,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   /// 배치된 슬롯들의 급여·eachOvr·시세·특성 확보 (묶음 1회) 후 팀컬러 계산
   Future<void> _enrichSlots() async {
-    await _ensureFieldsAll(
-        _filled.map((s) => (s.player!['spid'] as num).toInt()));
+    await _ensureFieldsAll(_filled.map((s) => (s.player!['spid'] as num).toInt()));
     _scheduleCalc();
   }
 
@@ -460,27 +573,25 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     if (name.isEmpty || _userLoading) return;
     setState(() => _userLoading = true);
     try {
-      final r = await http.get(
-        Uri.parse('${ApiService.baseUrl}/api/user/squad/user-squad'
-            '?name=${Uri.encodeComponent(name)}&mode=$mode'),
-      ).timeout(const Duration(seconds: 40));
+      final r = await http
+          .get(
+            Uri.parse('${ApiService.baseUrl}/api/user/squad/user-squad'
+                '?name=${Uri.encodeComponent(name)}&mode=$mode'),
+          )
+          .timeout(const Duration(seconds: 40));
       final d = json.decode(r.body);
       if (d['success'] != true) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(d['message'] ?? '스쿼드 조회에 실패했습니다.')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(d['message'] ?? '스쿼드 조회에 실패했습니다.')));
         }
         return;
       }
-      final rows = (d['players'] as List? ?? [])
-          .map((p) => Map<String, dynamic>.from(p))
-          .toList();
+      final rows = (d['players'] as List? ?? []).map((p) => Map<String, dynamic>.from(p)).toList();
       // 불러온 포지션 그대로 커스텀 슬롯 구성
       setState(() {
         _slots = rows.map((p) {
           final sp = (p['sp_position'] as num? ?? 25).toInt();
-          return _Slot(kSpposRole[sp] ?? 'st', sp,
-              grade: (p['grade'] as num? ?? 1).toInt());
+          return _Slot(kSpposRole[sp] ?? 'st', sp, grade: (p['grade'] as num? ?? 1).toInt());
         }).toList();
         _formation = d['formation5']?.toString() ?? '4-1-2-3';
         _customLabel = '$name의 스쿼드 ($_formation)';
@@ -502,9 +613,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         }
         // 동봉 실패 카드만 기존 검색 폴백 (검증된 방식)
         final players = await _searchPlayers(pd['name']?.toString() ?? '');
-        final found = (players ?? [])
-            .where((c) => '${c['spid']}' == '${pd['spid']}')
-            .toList();
+        final found = (players ?? []).where((c) => '${c['spid']}' == '${pd['spid']}').toList();
         if (found.isNotEmpty) {
           _slots[i].player = found.first;
           TraitStore.ensure(found.first['spid'] as num?);
@@ -516,14 +625,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       // 시세(30분)·누락 특성 보강
       _enrichSlots();
       if (missed > 0 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('$missed명은 선수 정보를 찾지 못해 비워뒀습니다.')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$missed명은 선수 정보를 찾지 못해 비워뒀습니다.')));
       }
       _scheduleCalc();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('네트워크 오류가 발생했습니다.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('네트워크 오류가 발생했습니다.')));
       }
     } finally {
       if (mounted) setState(() => _userLoading = false);
@@ -538,36 +645,26 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheet) => Padding(
-          padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+          padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('유저 스쿼드 불러오기',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const Text('유저 스쿼드 불러오기', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              Text('감독명의 가장 최근 경기 선발 11명을 불러와 자유롭게 수정할 수 있습니다.',
-                  style: TextStyle(fontSize: 12, color: _subColor)),
+              Text('감독명의 가장 최근 경기 선발 11명을 불러와 자유롭게 수정할 수 있습니다.', style: TextStyle(fontSize: 12, color: _subColor)),
               const SizedBox(height: 12),
               PillTabs(
                 labels: const ['감독모드', '1vs1'],
                 selectedIndex: mode == 'manager' ? 0 : 1,
-                onSelected: (i) =>
-                    setSheet(() => mode = i == 0 ? 'manager' : '1vs1'),
+                onSelected: (i) => setSheet(() => mode = i == 0 ? 'manager' : '1vs1'),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: nameCtrl,
                 autofocus: true,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                    labelText: '감독명',
-                    border: OutlineInputBorder(),
-                    isDense: true),
+                decoration: const InputDecoration(labelText: '감독명', border: OutlineInputBorder(), isDense: true),
                 onSubmitted: (_) {
                   Navigator.pop(context);
                   _loadUserSquad(nameCtrl.text.trim(), mode);
@@ -639,9 +736,34 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               searching = false;
               results = r ?? [];
             });
+            // 팀컬러 일치 표시·필터용 메타를 묶음 1회로 확보 (1.0.4)
+            final ids = (r ?? []).map((c) => c['spid'] as num?).whereType<num>().toList();
+            if (ids.isNotEmpty) {
+              PlayerMetaStore.ensureAll(ids).then((_) {
+                if (context.mounted) setSheet(() {});
+              });
+            }
+          }
+
+          List<Map<String, dynamic>> applyTcFilter(List<Map<String, dynamic>> list) {
+            if (!_tcFilterOn) return list;
+            return list.where((c) {
+              final m = _tcMatches(c['spid'] as num?);
+              return m == null || m.isNotEmpty; // 미조회분은 우선 표시
+            }).toList();
           }
 
           final picks = _picksForSlot(slot).take(15).toList();
+          final pickIds = picks
+              .map((c) => c['spid'] as num?)
+              .whereType<num>()
+              .where((id) => PlayerMetaStore.cached(id) == null)
+              .toList();
+          if (pickIds.isNotEmpty) {
+            PlayerMetaStore.ensureAll(pickIds).then((_) {
+              if (context.mounted) setSheet(() {});
+            });
+          }
           final usedSpids = _slots
               .asMap()
               .entries
@@ -654,17 +776,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             initialChildSize: 0.75,
             maxChildSize: 0.95,
             builder: (context, controller) => Padding(
-              padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 14,
-                  bottom: MediaQuery.of(context).viewInsets.bottom),
+              padding: EdgeInsets.only(left: 16, right: 16, top: 14, bottom: MediaQuery.of(context).viewInsets.bottom),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('${slot.role.toUpperCase()} 자리 선수 선택',
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800)),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 10),
                   PillTabs(
                     labels: const ['선수 검색', '이 자리 랭커픽'],
@@ -683,50 +800,46 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           prefixIcon: Icon(Icons.search, size: 18)),
                       onChanged: (v) {
                         debounce?.cancel();
-                        debounce = Timer(const Duration(milliseconds: 350),
-                            () => doSearch(v));
+                        debounce = Timer(const Duration(milliseconds: 350), () => doSearch(v));
                       },
                     ),
-                    const SizedBox(height: 8),
+                    _tcFilterRow(setSheet),
                     Expanded(
                       child: searching
                           ? const Center(child: CircularProgressIndicator())
                           : results == null
-                              ? Center(
-                                  child: Text('선수명을 입력하세요.',
-                                      style: TextStyle(
-                                          fontSize: 12.5, color: _subColor)))
+                              ? Center(child: Text('선수명을 입력하세요.', style: TextStyle(fontSize: 12.5, color: _subColor)))
                               : results!.isEmpty
                                   ? Center(
-                                      child: Text('검색 결과가 없습니다.',
-                                          style: TextStyle(
-                                              fontSize: 12.5,
-                                              color: _subColor)))
-                                  : ListView.builder(
-                                      controller: controller,
-                                      itemCount: results!.length,
-                                      itemBuilder: (context, i) {
-                                        final p = results![i];
-                                        final dup = usedSpids
-                                            .contains('${p['spid']}');
-                                        return _playerResultRow(
-                                          p,
-                                          slot: slot,
-                                          disabled: dup,
-                                          trailing: Text(
-                                              '1강 ${formatBp(_priceAt(p, 1))}',
-                                              style: const TextStyle(
-                                                  fontSize: 11.5,
-                                                  fontWeight:
-                                                      FontWeight.w700)),
-                                          onTap: () {
-                                            if (_placePlayer(idx, p, 1)) {
-                                              Navigator.pop(context);
-                                            }
-                                          },
-                                        );
-                                      },
-                                    ),
+                                      child: Text('검색 결과가 없습니다.', style: TextStyle(fontSize: 12.5, color: _subColor)))
+                                  : Builder(builder: (context) {
+                                      final shown = applyTcFilter(results!);
+                                      if (shown.isEmpty) {
+                                        return Center(
+                                            child: Text('내 스쿼드 팀컬러와 맞는 카드가 없습니다.',
+                                                style: TextStyle(fontSize: 12.5, color: _subColor)));
+                                      }
+                                      return ListView.builder(
+                                        controller: controller,
+                                        itemCount: shown.length,
+                                        itemBuilder: (context, i) {
+                                          final p = shown[i];
+                                          final dup = usedSpids.contains('${p['spid']}');
+                                          return _playerResultRow(
+                                            p,
+                                            slot: slot,
+                                            disabled: dup,
+                                            trailing: Text('1강 ${formatBp(_priceAt(p, 1))}',
+                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                                            onTap: () {
+                                              if (_placePlayer(idx, p, 1)) {
+                                                Navigator.pop(context);
+                                              }
+                                            },
+                                          );
+                                        },
+                                      );
+                                    }),
                     ),
                   ] else ...[
                     Text(
@@ -736,75 +849,76 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                 '${_teamcolor.isNotEmpty ? ' · $_teamcolor' : ' · 전체 팀컬러'}'
                                 '${_snapDate.isNotEmpty ? ' ($_snapDate 수집)' : ''}',
                         style: TextStyle(fontSize: 11, color: _subColor)),
-                    const SizedBox(height: 6),
+                    _tcFilterRow(setSheet),
                     Expanded(
                       child: picks.isEmpty
                           ? Center(
-                              child: Text(
-                                  '이 포지션(${slot.role.toUpperCase()})의 랭커 사용 데이터가 없습니다.',
-                                  style: TextStyle(
-                                      fontSize: 12.5, color: _subColor)))
-                          : ListView.builder(
-                              controller: controller,
-                              itemCount: picks.length,
-                              itemBuilder: (context, i) {
-                                final p = picks[i];
-                                final dup =
-                                    usedSpids.contains('${p['spid']}');
-                                final users =
-                                    (p['users'] as num? ?? 0).toInt();
-                                final pct = _base > 0
-                                    ? (users * 100.0 / _base)
-                                        .toStringAsFixed(1)
-                                    : null;
-                                return ListTile(
-                                  enabled: !dup,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 4),
-                                  leading: ClipOval(
-                                    child: Image.network(
-                                      p['face_url'] ?? '',
-                                      width: 40,
-                                      height: 40,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (c, e, s) =>
-                                          const Icon(Icons.person, size: 40),
+                              child: Text('이 포지션(${slot.role.toUpperCase()})의 랭커 사용 데이터가 없습니다.',
+                                  style: TextStyle(fontSize: 12.5, color: _subColor)))
+                          : Builder(builder: (context) {
+                              final shownPicks = applyTcFilter(picks);
+                              if (shownPicks.isEmpty) {
+                                return Center(
+                                    child: Text('내 스쿼드 팀컬러와 맞는 카드가 없습니다.',
+                                        style: TextStyle(fontSize: 12.5, color: _subColor)));
+                              }
+                              return ListView.builder(
+                                controller: controller,
+                                itemCount: shownPicks.length,
+                                itemBuilder: (context, i) {
+                                  final p = shownPicks[i];
+                                  final dup = usedSpids.contains('${p['spid']}');
+                                  final users = (p['users'] as num? ?? 0).toInt();
+                                  final pct = _base > 0 ? (users * 100.0 / _base).toStringAsFixed(1) : null;
+                                  return ListTile(
+                                    enabled: !dup,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                                    leading: ClipOval(
+                                      child: Image.network(
+                                        p['face_url'] ?? '',
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40),
+                                      ),
                                     ),
-                                  ),
-                                  title: Text(
-                                      '${p['name']}${dup ? ' (다른 자리 사용 중)' : ''}',
-                                      style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w700)),
-                                  subtitle: Row(
-                                    children: [
-                                      SeasonBadge(
-                                          spid: p['spid'] as num?,
-                                          height: 13,
-                                          fallbackText:
-                                              p['season']?.toString()),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                          '랭커 $users명 사용'
-                                          '${pct != null ? ' ($pct%)' : ''}',
-                                          style: const TextStyle(
-                                              fontSize: 12)),
-                                    ],
-                                  ),
-                                  trailing: GradeBadge(
-                                      grade:
-                                          (p['grade'] as num? ?? 1).toInt(),
-                                      fontSize: 12),
-                                  onTap: dup
-                                      ? null
-                                      : () {
-                                          if (_placePick(idx, p)) {
-                                            Navigator.pop(context);
-                                          }
-                                        },
-                                );
-                              },
-                            ),
+                                    title: Text('${p['name']}${dup ? ' (다른 자리 사용 중)' : ''}',
+                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                                    subtitle: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            SeasonBadge(
+                                                spid: p['spid'] as num?,
+                                                height: 13,
+                                                fallbackText: p['season']?.toString()),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                  '랭커 $users명 사용'
+                                                  '${pct != null ? ' ($pct%)' : ''}',
+                                                  style: const TextStyle(fontSize: 12),
+                                                  overflow: TextOverflow.ellipsis),
+                                            ),
+                                          ],
+                                        ),
+                                        _tcMatchLine(p['spid'] as num?),
+                                      ],
+                                    ),
+                                    isThreeLine: _tcMatches(p['spid'] as num?) != null,
+                                    trailing: GradeBadge(grade: (p['grade'] as num? ?? 1).toInt(), fontSize: 12),
+                                    onTap: dup
+                                        ? null
+                                        : () {
+                                            if (_placePick(idx, p)) {
+                                              Navigator.pop(context);
+                                            }
+                                          },
+                                  );
+                                },
+                              );
+                            }),
                     ),
                   ],
                 ],
@@ -818,11 +932,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   /// 검색/시즌 목록 공용 행 (얼굴 · 이름+시즌 · 포지션/급여/이 자리 0강 OVR · 우측 커스텀)
   Widget _playerResultRow(Map<String, dynamic> p,
-      {required _Slot slot,
-      bool disabled = false,
-      bool isCurrent = false,
-      Widget? trailing,
-      VoidCallback? onTap}) {
+      {required _Slot slot, bool disabled = false, bool isCurrent = false, Widget? trailing, VoidCallback? onTap}) {
     final posOvr = _eachOvrAt(p, slot.spPos);
     return ListTile(
       enabled: !disabled,
@@ -845,21 +955,23 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 '${isCurrent ? ' (현재)' : ''}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w700)),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
           ),
           const SizedBox(width: 6),
-          SeasonBadge(
-              spid: p['spid'] as num?,
-              height: 13,
-              fallbackText: p['season']?.toString()),
+          SeasonBadge(spid: p['spid'] as num?, height: 13, fallbackText: p['season']?.toString()),
         ],
       ),
-      subtitle: Text(
-          '${(p['position'] ?? '').toString().toUpperCase()}'
-          ' · 급여 ${p['pay'] ?? '-'}'
-          ' · 이 자리 0강 OVR ${posOvr > 0 ? posOvr : '-'}',
-          style: TextStyle(fontSize: 11.5, color: _subColor)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              '${(p['position'] ?? '').toString().toUpperCase()}'
+              ' · 급여 ${p['pay'] ?? '-'}'
+              ' · 이 자리 0강 OVR ${posOvr > 0 ? posOvr : '-'}',
+              style: TextStyle(fontSize: 11.5, color: _subColor)),
+          _tcMatchLine(p['spid'] as num?),
+        ],
+      ),
       trailing: trailing,
       onTap: disabled ? null : onTap,
     );
@@ -883,9 +995,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             loadRequested = true;
             _searchPlayers(p['name']?.toString() ?? '').then((players) {
               final pid = _playerPid(p);
-              final v = (players ?? [])
-                  .where((c) => _playerPid(c) == pid)
-                  .toList();
+              final v = (players ?? []).where((c) => _playerPid(c) == pid).toList();
               setSheet(() {
                 variants = v;
                 variantsLoading = false;
@@ -903,8 +1013,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
                 Text('${slot.role.toUpperCase()} — ${p['name'] ?? ''}',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w800)),
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 10),
                 // 현재 카드 요약
                 Row(
@@ -915,8 +1024,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                         width: 48,
                         height: 48,
                         fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) =>
-                            const Icon(Icons.person, size: 48),
+                        errorBuilder: (c, e, s) => const Icon(Icons.person, size: 48),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -930,41 +1038,29 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                 child: Text('${p['name'] ?? ''}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w800)),
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                               ),
                               const SizedBox(width: 6),
-                              SeasonBadge(
-                                  spid: p['spid'] as num?,
-                                  height: 14,
-                                  fallbackText: p['season']?.toString()),
+                              SeasonBadge(spid: p['spid'] as num?, height: 14, fallbackText: p['season']?.toString()),
                             ],
                           ),
                           Text(
                               '${(p['position'] ?? '').toString().toUpperCase()}'
                               ' · 급여 ${p['pay'] ?? '-'}'
                               ' · OVR ${ovr ?? '-'}',
-                              style: TextStyle(
-                                  fontSize: 12, color: _subColor)),
-                          Text(
-                              '${slot.grade}강 시세 ${formatBp(_priceAt(p, slot.grade))}',
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w800,
-                                  color: _accent)),
+                              style: TextStyle(fontSize: 12, color: _subColor)),
+                          Text('${slot.grade}강 시세 ${formatBp(_priceAt(p, slot.grade))}',
+                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: _accent)),
                         ],
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
+                _tcChips(p['spid'] as num?),
+                const SizedBox(height: 12),
                 Text('강화 단계',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                        color: _subColor)),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: _subColor)),
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
@@ -986,29 +1082,19 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           height: 34,
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: g == slot.grade
-                                ? _accent.withOpacity(0.20)
-                                : Colors.grey.withOpacity(0.10),
+                            color: g == slot.grade ? _accent.withOpacity(0.20) : Colors.grey.withOpacity(0.10),
                             borderRadius: BorderRadius.circular(8),
-                            border: g == slot.grade
-                                ? Border.all(color: _accent)
-                                : null,
+                            border: g == slot.grade ? Border.all(color: _accent) : null,
                           ),
                           child: Text('$g',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  color: g == slot.grade ? _accent : null)),
+                              style: TextStyle(fontWeight: FontWeight.w800, color: g == slot.grade ? _accent : null)),
                         ),
                       ),
                   ],
                 ),
                 const SizedBox(height: 14),
                 Text('시즌 카드 변경 (강화 단계 유지)',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                        color: _subColor)),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.2, color: _subColor)),
                 const SizedBox(height: 4),
                 if (variantsLoading)
                   const Padding(
@@ -1018,8 +1104,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 else if (variants == null || variants!.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('다른 시즌 카드가 없습니다.',
-                        style: TextStyle(fontSize: 12.5, color: _subColor)),
+                    child: Text('다른 시즌 카드가 없습니다.', style: TextStyle(fontSize: 12.5, color: _subColor)),
                   )
                 else
                   for (final c in variants!)
@@ -1029,12 +1114,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                       isCurrent: '${c['spid']}' == '${p['spid']}',
                       disabled: '${c['spid']}' != '${p['spid']}' &&
                           _slots.asMap().entries.any((e) =>
-                              e.key != idx &&
-                              e.value.player != null &&
-                              '${e.value.player!['spid']}' == '${c['spid']}'),
+                              e.key != idx && e.value.player != null && '${e.value.player!['spid']}' == '${c['spid']}'),
                       trailing: Text('1강 ${formatBp(_priceAt(c, 1))}',
-                          style: const TextStyle(
-                              fontSize: 11.5, fontWeight: FontWeight.w700)),
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
                       onTap: () {
                         if ('${c['spid']}' == '${p['spid']}') return;
                         setState(() {
@@ -1071,8 +1153,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           _scheduleCalc();
                           Navigator.pop(context);
                         },
-                        icon: Icon(Icons.person_remove,
-                            size: 16, color: _rose),
+                        icon: Icon(Icons.person_remove, size: 16, color: _rose),
                         label: Text('제거', style: TextStyle(color: _rose)),
                       ),
                     ),
@@ -1090,6 +1171,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           spid: (p['spid'] as num).toInt(),
                           name: '${p['name'] ?? ''}',
                           grade: slot.grade,
+                          // 현재 스쿼드에서 발동 중인 '전체 능력치 +N' 팀컬러를 자동 채움
+                          tcBonus: ((_tcCalc?['tc_bonus_by_spid'] as Map?)?['${p['spid']}'] as num?)?.toInt() ?? 0,
                           role: slot.role,
                           faceUrl: p['face_url']?.toString(),
                           season: p['season']?.toString(),
@@ -1110,8 +1193,17 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   // ── 저장/불러오기 (SharedPreferences — 웹 localStorage 이식) ──
   static const _keepFields = [
-    'spid', 'pid', 'name', 'season', 'seasonImgBig', 'position',
-    'pay', 'eachOvr', 'eachPrice', 'face_url', 'thumb',
+    'spid',
+    'pid',
+    'name',
+    'season',
+    'seasonImgBig',
+    'position',
+    'pay',
+    'eachOvr',
+    'eachPrice',
+    'face_url',
+    'thumb',
   ];
 
   Map<String, dynamic> _slimPlayer(Map<String, dynamic> p) {
@@ -1125,8 +1217,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   Future<Map<String, dynamic>> _loadStore() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return Map<String, dynamic>.from(
-          json.decode(prefs.getString(_storageKey) ?? '{}'));
+      return Map<String, dynamic>.from(json.decode(prefs.getString(_storageKey) ?? '{}'));
     } catch (_) {
       return {};
     }
@@ -1139,8 +1230,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   Future<void> _saveSquad() async {
     if (_filled.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('배치된 선수가 없습니다.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('배치된 선수가 없습니다.')));
       return;
     }
     final nameCtrl = TextEditingController(text: '내 스쿼드');
@@ -1155,12 +1245,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           onSubmitted: (v) => Navigator.pop(context, v.trim()),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('취소')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, nameCtrl.text.trim()),
-              child: const Text('저장')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(context, nameCtrl.text.trim()), child: const Text('저장')),
         ],
       ),
     );
@@ -1182,8 +1268,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     };
     await _saveStore(store);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"$name" 저장 완료 (이 기기에 저장됩니다)')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('"$name" 저장 완료 (이 기기에 저장됩니다)')));
     }
   }
 
@@ -1191,8 +1276,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     final store = await _loadStore();
     if (store.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('저장된 스쿼드가 없습니다.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('저장된 스쿼드가 없습니다.')));
       }
       return;
     }
@@ -1207,9 +1291,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             children: [
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-                child: Text('저장된 스쿼드',
-                    style:
-                        TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                child: Text('저장된 스쿼드', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
               ),
               Flexible(
                 child: ListView(
@@ -1217,17 +1299,13 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   children: [
                     for (final name in store.keys.toList())
                       ListTile(
-                        title: Text(name,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w700)),
+                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
                         subtitle: Text(
                             '${store[name]?['custom_label'] ?? store[name]?['formation'] ?? ''}'
                             ' · ${(store[name]?['saved_at'] ?? '').toString().split('T').first}',
-                            style: TextStyle(
-                                fontSize: 11.5, color: _subColor)),
+                            style: TextStyle(fontSize: 11.5, color: _subColor)),
                         trailing: IconButton(
-                          icon: Icon(Icons.delete_outline,
-                              size: 20, color: _rose),
+                          icon: Icon(Icons.delete_outline, size: 20, color: _rose),
                           onPressed: () async {
                             store.remove(name);
                             await _saveStore(store);
@@ -1239,8 +1317,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                         ),
                         onTap: () {
                           Navigator.pop(context);
-                          _applySaved(
-                              Map<String, dynamic>.from(store[name] as Map));
+                          _applySaved(Map<String, dynamic>.from(store[name] as Map));
                         },
                       ),
                   ],
@@ -1254,23 +1331,16 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   }
 
   void _applySaved(Map<String, dynamic> data) {
-    final rows = (data['slots'] as List? ?? [])
-        .map((s) => Map<String, dynamic>.from(s))
-        .toList();
+    final rows = (data['slots'] as List? ?? []).map((s) => Map<String, dynamic>.from(s)).toList();
     if (rows.isEmpty) return;
     setState(() {
       _formation = data['formation']?.toString() ?? '4-3-3';
       _customLabel = data['custom_label']?.toString();
       _adap = (data['adap'] as num? ?? 5).toInt();
       _slots = rows.map((s) {
-        final sp = (s['sp_pos'] as num? ??
-                kRoleSppos[s['role']?.toString() ?? 'st'] ??
-                25)
-            .toInt();
+        final sp = (s['sp_pos'] as num? ?? kRoleSppos[s['role']?.toString() ?? 'st'] ?? 25).toInt();
         return _Slot(s['role']?.toString() ?? (kSpposRole[sp] ?? 'st'), sp,
-            player: s['player'] == null
-                ? null
-                : Map<String, dynamic>.from(s['player'] as Map),
+            player: s['player'] == null ? null : Map<String, dynamic>.from(s['player'] as Map),
             grade: (s['grade'] as num? ?? 1).toInt());
       }).toList();
       _tcCalc = null;
@@ -1281,12 +1351,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   // ── 이미지 공유 (RepaintBoundary 캡처 — 웹 html2canvas 대응) ──
   Future<void> _shareImage() async {
     try {
-      final boundary = _pitchKey.currentContext?.findRenderObject()
-          as RenderRepaintBoundary?;
+      final boundary = _pitchKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
       final image = await boundary.toImage(pixelRatio: 2.0);
-      final byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) return;
       final dir = await getTemporaryDirectory();
       final ts = DateTime.now();
@@ -1299,8 +1367,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     } catch (e) {
       print('[SquadTab] 이미지 공유 실패: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이미지 공유에 실패했습니다.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('이미지 공유에 실패했습니다.')));
       }
     }
   }
@@ -1312,9 +1379,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       builder: (context) => AlertDialog(
         content: const Text('배치한 선수를 모두 지울까요?'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
@@ -1336,9 +1401,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   // ── 팀컬러 선택 시트 (콤보 + 직접입력 자동완성 통합 — 모바일형) ──
   void _openTeamcolorSheet() {
-    final tcs = (_meta?['teamcolors'] as List? ?? [])
-        .map((t) => Map<String, dynamic>.from(t))
-        .toList();
+    final tcs = (_meta?['teamcolors'] as List? ?? []).map((t) => Map<String, dynamic>.from(t)).toList();
     final filterCtrl = TextEditingController();
     showModalBottomSheet(
       context: context,
@@ -1346,28 +1409,17 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       builder: (context) => StatefulBuilder(
         builder: (context, setSheet) {
           final q = filterCtrl.text.trim().toLowerCase();
-          final hits = q.isEmpty
-              ? tcs
-              : tcs
-                  .where((t) =>
-                      (t['name'] as String).toLowerCase().contains(q))
-                  .toList();
+          final hits = q.isEmpty ? tcs : tcs.where((t) => (t['name'] as String).toLowerCase().contains(q)).toList();
           return DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.7,
             maxChildSize: 0.95,
             builder: (context, controller) => Padding(
-              padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 14,
-                  bottom: MediaQuery.of(context).viewInsets.bottom),
+              padding: EdgeInsets.only(left: 16, right: 16, top: 14, bottom: MediaQuery.of(context).viewInsets.bottom),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('팀컬러 선택',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800)),
+                  const Text('팀컬러 선택', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 10),
                   TextField(
                     controller: filterCtrl,
@@ -1396,14 +1448,11 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           ListTile(
                             dense: true,
                             title: Text('${t['name']}'),
-                            subtitle: Text(
-                                '${t['pct'] ?? 0}% (${t['users'] ?? 0}명)',
-                                style: TextStyle(
-                                    fontSize: 11, color: _subColor)),
+                            subtitle: Text('${t['pct'] ?? 0}% (${t['users'] ?? 0}명)',
+                                style: TextStyle(fontSize: 11, color: _subColor)),
                             selected: _teamcolor == t['name'],
                             onTap: () {
-                              setState(
-                                  () => _teamcolor = t['name'] as String);
+                              setState(() => _teamcolor = t['name'] as String);
                               Navigator.pop(context);
                             },
                           ),
@@ -1440,10 +1489,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             const SizedBox(width: 8),
             DropdownButton<int>(
               value: _top,
-              items: _topOptions
-                  .map((t) => DropdownMenuItem(
-                      value: t, child: Text(t == 10000 ? '전체' : '상위 $t')))
-                  .toList(),
+              items:
+                  _topOptions.map((t) => DropdownMenuItem(value: t, child: Text(t == 10000 ? '전체' : '상위 $t'))).toList(),
               onChanged: (v) {
                 if (v == null) return;
                 setState(() => _top = v);
@@ -1464,16 +1511,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   decoration: const InputDecoration(
                       isDense: true,
                       border: OutlineInputBorder(),
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 10, vertical: 10)),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10)),
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text(
-                            _teamcolor.isEmpty ? '전체 팀컬러' : _teamcolor,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13.5)),
+                        child: Text(_teamcolor.isEmpty ? '전체 팀컬러' : _teamcolor,
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5)),
                       ),
                       Icon(Icons.arrow_drop_down, color: _subColor),
                     ],
@@ -1490,8 +1533,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   const DropdownMenuItem(value: '', child: Text('전체 포메이션')),
                   ...fms.map((f) => DropdownMenuItem(
                         value: f['name'] as String,
-                        child: Text('${f['name']} (${f['pct']}%)',
-                            overflow: TextOverflow.ellipsis),
+                        child: Text('${f['name']} (${f['pct']}%)', overflow: TextOverflow.ellipsis),
                       )),
                 ],
                 onChanged: (v) => setState(() => _formationCond = v ?? ''),
@@ -1507,10 +1549,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               child: ElevatedButton.icon(
                 onPressed: (_metaLoading || _generating) ? null : _generate,
                 icon: _generating
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.auto_fix_high, size: 18),
                 label: Text(_generating ? '생성 중...' : '랭커 스쿼드 생성'),
               ),
@@ -1520,13 +1559,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               child: OutlinedButton.icon(
                 onPressed: _userLoading ? null : _openUserSquadSheet,
                 // 좁은 화면에서 '유저 스/쿼드' 두 줄 줄바꿈 방지 — 한 줄 유지 + 축소
-                style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
                 icon: _userLoading
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.person_search, size: 16),
                 label: const FittedBox(
                   fit: BoxFit.scaleDown,
@@ -1545,13 +1580,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 value: _customLabel != null ? '__custom' : _formation,
                 isExpanded: true,
                 items: [
-                  ...kFormations.keys.map((f) =>
-                      DropdownMenuItem(value: f, child: Text('포메이션 $f'))),
+                  ...kFormations.keys.map((f) => DropdownMenuItem(value: f, child: Text('포메이션 $f'))),
                   if (_customLabel != null)
-                    DropdownMenuItem(
-                        value: '__custom',
-                        child: Text(_customLabel!,
-                            overflow: TextOverflow.ellipsis)),
+                    DropdownMenuItem(value: '__custom', child: Text(_customLabel!, overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) {
                   if (v == null || v == '__custom') return;
@@ -1569,8 +1600,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             DropdownButton<int>(
               value: _adap,
               items: [
-                for (var a = 1; a <= 5; a++)
-                  DropdownMenuItem(value: a, child: Text('적응도 $a')),
+                for (var a = 1; a <= 5; a++) DropdownMenuItem(value: a, child: Text('적응도 $a')),
               ],
               onChanged: (v) {
                 if (v == null) return;
@@ -1612,10 +1642,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         final entries = tc[sec[0]] as Map? ?? {};
         for (final e in entries.values) {
           if (e is! Map) continue;
-          final skills = (e['skill']?.toString() ?? '')
-              .split('|')
-              .where((s) => s.trim().isNotEmpty)
-              .join(' · ');
+          final skills = (e['skill']?.toString() ?? '').split('|').where((s) => s.trim().isNotEmpty).join(' · ');
           tcEntries.add({
             'label': sec[1],
             'name': '${e['name'] ?? ''}',
@@ -1640,11 +1667,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('인원',
-                          style: TextStyle(fontSize: 10, color: _subColor)),
-                      Text('${_filled.length}/11',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w800)),
+                      Text('인원', style: TextStyle(fontSize: 10, color: _subColor)),
+                      Text('${_filled.length}/11', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                     ],
                   ),
                 ),
@@ -1652,14 +1676,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('총 급여',
-                          style: TextStyle(fontSize: 10, color: _subColor)),
-                      Text(
-                          payKnown == 0 ? '-' : '$totalPay / $_payLimit',
+                      Text('총 급여', style: TextStyle(fontSize: 10, color: _subColor)),
+                      Text(payKnown == 0 ? '-' : '$totalPay / $_payLimit',
                           style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: totalPay > _payLimit ? _rose : null)),
+                              fontSize: 16, fontWeight: FontWeight.w800, color: totalPay > _payLimit ? _rose : null)),
                     ],
                   ),
                 ),
@@ -1667,11 +1687,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('총 구단가치',
-                          style: TextStyle(fontSize: 10, color: _subColor)),
+                      Text('총 구단가치', style: TextStyle(fontSize: 10, color: _subColor)),
                       Text(totalPrice == 0 ? '-' : formatBp(totalPrice),
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w800)),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
                     ],
                   ),
                 ),
@@ -1681,14 +1699,11 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             Text('팀컬러', style: TextStyle(fontSize: 10, color: _subColor)),
             const SizedBox(height: 4),
             if (_filled.isEmpty)
-              Text('배치된 선수가 없습니다.',
-                  style: TextStyle(fontSize: 12, color: _subColor))
+              Text('배치된 선수가 없습니다.', style: TextStyle(fontSize: 12, color: _subColor))
             else if (_tcCalc == null)
-              Text('팀컬러 계산 중...',
-                  style: TextStyle(fontSize: 12, color: _subColor))
+              Text('팀컬러 계산 중...', style: TextStyle(fontSize: 12, color: _subColor))
             else if (tcEntries.isEmpty)
-              Text('발동한 팀컬러가 없습니다.',
-                  style: TextStyle(fontSize: 12, color: _subColor))
+              Text('발동한 팀컬러가 없습니다.', style: TextStyle(fontSize: 12, color: _subColor))
             else
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1706,8 +1721,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                 e['image'] as String,
                                 width: 22,
                                 height: 22,
-                                errorBuilder: (c, err, s) =>
-                                    const SizedBox(width: 22, height: 22),
+                                errorBuilder: (c, err, s) => const SizedBox(width: 22, height: 22),
                               ),
                             )
                           else
@@ -1718,25 +1732,20 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                               children: [
                                 Wrap(
                                   spacing: 5,
-                                  crossAxisAlignment:
-                                      WrapCrossAlignment.center,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     Text('${e['name']}',
                                         style: TextStyle(
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.w800,
-                                            color: e['label'] == '특별'
-                                                ? _accent
-                                                : null)),
+                                            color: e['label'] == '특별' ? _accent : null)),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 1),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                       decoration: BoxDecoration(
                                         color: e['label'] == '특별'
                                             ? _accent.withOpacity(0.18)
                                             : Colors.grey.withOpacity(0.14),
-                                        borderRadius:
-                                            BorderRadius.circular(999),
+                                        borderRadius: BorderRadius.circular(999),
                                       ),
                                       child: Text(
                                           '${e['label']}'
@@ -1745,16 +1754,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                           style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.w700,
-                                              color: e['label'] == '특별'
-                                                  ? _accent
-                                                  : _subColor)),
+                                              color: e['label'] == '특별' ? _accent : _subColor)),
                                     ),
                                   ],
                                 ),
                                 if ((e['skill'] as String).isNotEmpty)
-                                  Text('${e['skill']}',
-                                      style: TextStyle(
-                                          fontSize: 11, color: _subColor)),
+                                  Text('${e['skill']}', style: TextStyle(fontSize: 11, color: _subColor)),
                               ],
                             ),
                           ),
@@ -1873,8 +1878,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             onPressed: onTap,
             icon: Icon(icon, size: 15),
             label: Text(label, style: const TextStyle(fontSize: 12)),
-            style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 4)),
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4)),
           ),
         );
     return Row(

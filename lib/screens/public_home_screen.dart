@@ -1,3 +1,4 @@
+import 'training_calc_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
@@ -21,7 +22,7 @@ class PublicHomeScreen extends StatefulWidget {
   const PublicHomeScreen({Key? key, this.initialIndex}) : super(key: key);
 
   /// 매크로 탭 인덱스 (main.dart·login_screen 라우팅에서 사용)
-  static const int macroTabIndex = 5;
+  static const int macroTabIndex = 6; // 1.0.4: 집훈 탭 추가로 +1
 
   @override
   _PublicHomeScreenState createState() => _PublicHomeScreenState();
@@ -35,7 +36,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
   DateTime? _lastBackPressed; // 뒤로가기 2회 종료 판정
 
   bool get _isMacro => _apiService.isLoggedIn && _apiService.isMacroAccount;
-  int get _maxIndex => _isMacro ? 6 : 5;
+  int get _maxIndex => _isMacro ? 7 : 6;
 
   @override
   void initState() {
@@ -61,8 +62,11 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       case 'squad':
         _selectTab(3);
         break;
-      case 'market':
+      case 'training':
         _selectTab(4);
+        break;
+      case 'market':
+        _selectTab(5);
         break;
       case 'more':
         _selectTab(_maxIndex);
@@ -96,6 +100,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       SearchTab(requestNotifier: _searchRequest),
       const RankingTab(),
       const SquadTab(),
+      const TrainingCalcScreen(asTab: true), // 1.0.4 집훈 계산기 (공개 탭)
       const MarketTab(),
       if (isMacro)
         DashboardScreen(
@@ -109,6 +114,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       const PillBarItem(Icons.search, '검색'),
       const PillBarItem(Icons.leaderboard, '랭킹'),
       const PillBarItem(Icons.groups, '스쿼드'),
+      const PillBarItem(Icons.fitness_center, '집훈'),
       const PillBarItem(Icons.storefront, '이적시장'),
       if (isMacro) const PillBarItem(Icons.precision_manufacturing, '매크로'),
       const PillBarItem(Icons.more_horiz, '더보기'),

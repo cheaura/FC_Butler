@@ -37,8 +37,7 @@ class PlayerMetaStore {
   }
 
   /// 메모리 캐시에 있는 메타 (없으면 null). 위젯 build에서 동기 접근용.
-  static Map<String, dynamic>? cached(num? spid) =>
-      spid == null ? null : _mem[spid.toInt()];
+  static Map<String, dynamic>? cached(num? spid) => spid == null ? null : _mem[spid.toInt()];
 
   /// 캐시된 신규특성 목록 (is_new만). 미조회면 null, 조회 후 없으면 빈 목록.
   static List<Map<String, dynamic>>? cachedNewTraits(num? spid) {
@@ -64,13 +63,11 @@ class PlayerMetaStore {
     return p.isEmpty ? null : p;
   }
 
-  static bool _complete(Map<String, dynamic> m) =>
-      (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List;
+  static bool _complete(Map<String, dynamic> m) => (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List;
 
   /// 여러 spid를 한 번에 확보 (DB → 서버 묶음). 완료 후 cached()로 접근.
   /// [freshPrice]면 30분 지난 시세를 서버에 다시 요청한다.
-  static Future<void> ensureAll(Iterable<num?> spids,
-      {bool freshPrice = false}) async {
+  static Future<void> ensureAll(Iterable<num?> spids, {bool freshPrice = false}) async {
     final ids = spids.whereType<num>().map((e) => e.toInt()).toSet().toList();
     if (ids.isEmpty) return;
     await _loadFromDb(ids);
@@ -146,14 +143,11 @@ class PlayerMetaStore {
       for (var i = 0; i < missing.length; i += 500) {
         final chunk = missing.sublist(i, (i + 500).clamp(0, missing.length));
         final rows = await db.query('player_meta',
-            where: 'spid IN (${List.filled(chunk.length, '?').join(',')})',
-            whereArgs: chunk);
+            where: 'spid IN (${List.filled(chunk.length, '?').join(',')})', whereArgs: chunk);
         for (final r in rows) {
           try {
-            _mem[r['spid'] as int] =
-                Map<String, dynamic>.from(json.decode(r['json'] as String));
-            _memAt[r['spid'] as int] =
-                DateTime.fromMillisecondsSinceEpoch(r['fetched_at'] as int);
+            _mem[r['spid'] as int] = Map<String, dynamic>.from(json.decode(r['json'] as String));
+            _memAt[r['spid'] as int] = DateTime.fromMillisecondsSinceEpoch(r['fetched_at'] as int);
           } catch (_) {}
         }
       }
@@ -190,8 +184,7 @@ class PlayerMetaStore {
         }
         _mem[spid] = m;
         _memAt[spid] = now;
-        batch.insert('player_meta',
-            {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
+        batch.insert('player_meta', {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
             conflictAlgorithm: ConflictAlgorithm.replace);
       });
       await batch.commit(noResult: true);
@@ -228,8 +221,7 @@ class PlayerMetaStore {
       };
       _mem[spid] = m;
       _memAt[spid] = now;
-      batch?.insert('player_meta',
-          {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
+      batch?.insert('player_meta', {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
     try {

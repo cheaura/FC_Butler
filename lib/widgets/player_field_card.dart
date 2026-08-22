@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/positions.dart';
 import '../services/trait_store.dart';
+import '../services/player_meta_store.dart';
 import 'badges.dart';
 
 /// 필드 선수 카드 — 3화면(스쿼드 탭·검색 스쿼드 세그·경기 상세) 공용.
@@ -137,6 +138,9 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
     final avatarSize = widget.cardW * 0.60;
     final traits =
         widget.empty ? null : TraitStore.cached(widget.spid);
+    // 팀컬러 개수 점 (1.0.4, 2-A): 카드 하단 중앙. 내용은 카드를 눌렀을 때 시트에서.
+    final tcList = widget.empty ? null : PlayerMetaStore.cached(widget.spid)?['teamcolors'];
+    final tcCount = tcList is List ? tcList.length : 0;
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -253,6 +257,26 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
                     right: -7,
                     child:
                         GradeBadge(grade: widget.grade!, fontSize: 7.5),
+                  ),
+                // 하단 중앙: 팀컬러 개수 (1.0.4)
+                if (tcCount > 0)
+                  Positioned(
+                    bottom: -7,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFA78BFA),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: Colors.black54, width: 0.8),
+                        ),
+                        child: Text('$tcCount',
+                            style: const TextStyle(
+                                fontSize: 7, fontWeight: FontWeight.w800, color: Color(0xFF15102A), height: 1.2)),
+                      ),
+                    ),
                   ),
               ],
             ),

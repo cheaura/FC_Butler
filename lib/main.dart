@@ -8,9 +8,13 @@ import 'screens/public_home_screen.dart';
 import 'widgets/panenka_logo.dart';
 import 'services/api_service.dart';
 import 'services/fcm_service.dart';
+import 'services/error_reporter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 오류 자동 기록 (1.0.4): 프레임워크 오류·잡히지 않은 예외를 서버에 남김 (화면에는 표시 없음)
+  ErrorReporter.installHandlers();
+  await ErrorReporter.init();
   
   try {
     // Firebase 초기화
