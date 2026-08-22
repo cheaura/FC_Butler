@@ -52,6 +52,9 @@ class _MarketTabState extends State<MarketTab>
   bool _pnlLoading = false;
   List<Map<String, dynamic>> _pnl = [];
   String _pnlFormation = '';
+  // 구매가 심층 탐색 (2026-08-19 확정: +100건 더 찾기 / 끝까지 찾기)
+  bool _deepSearching = false;
+  bool _deepCancel = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -292,17 +295,6 @@ class _MarketTabState extends State<MarketTab>
           .toList();
       _pnlFormation = data['formation5'] ?? '';
 
-      // 구매가: 같은 spid+grade의 가장 최근 구매 (웹 squad-pnl과 동일 — grade까지 매칭)
-      num? lastBuy(int spid, int grade) {
-        for (final t in _trades['buy']!) {
-          if ((t['spid'] as num?)?.toInt() == spid &&
-              (t['grade'] as num?)?.toInt() == grade) {
-            return t['value'] as num?;
-          }
-        }
-        return null;
-      }
-
       // 시세: 서버 조회 (동시 4건 제한)
       final results = <Map<String, dynamic>>[];
       for (var i = 0; i < players.length; i += 4) {
@@ -323,7 +315,7 @@ class _MarketTabState extends State<MarketTab>
           final p = chunk[j];
           final spid = (p['spid'] as num).toInt();
           final grade = (p['grade'] as num).toInt();
-          final buy = lastBuy(spid, grade);
+          final buy = _lastBuy(spid, grade);
           final price = prices[j];
           results.add({
             ...p,
@@ -339,6 +331,117 @@ class _MarketTabState extends State<MarketTab>
     } finally {
       if (mounted) setState(() => _pnlLoading = false);
     }
+  }
+
+  /// 구매가: 같은 spid+grade의 가장 최근 구매 (웹 squad-pnl과 동일 — grade까지 정확 일치.
+  /// 강화 단계가 달라진 선수의 '-'는 정상 동작 — 사용자 확정, 손대지 말 것)
+  num? _lastBuy(int spid, int grade) {
+    for (final t in _trades['buy']!) {
+      if ((t['spid'] as num?)?.toInt() == spid &&
+          (t['grade'] as num?)?.toInt() == grade) {
+        return t['value'] as num?;
+      }
+    }
+    return null;
+  }
+
+  /// 확보된 구매 내역으로 손익 행들의 구매가만 재매칭 (시세는 유지)
+  void _rematchPnl() {
+    if (_pnl.isEmpty) return;
+    setState(() {
+      _pnl = _pnl.map((p) {
+        final buy = _lastBuy(
+            (p['spid'] as num).toInt(), (p['grade'] as num).toInt());
+        final price = p['price'] as num?;
+        return {
+          ...p,
+          'buy': buy,
+          'diff': (buy != null && price != null) ? price - buy : null,
+        };
+      }).toList();
+    });
+  }
+
+  /// 구매가 미확인 선수 수 (더 오래된 구매 내역에서 찾을 대상)
+  int get _missingBuyCount => _pnl.where((p) => p['buy'] == null).length;
+
+  /// 구매 내역 1페이지(100건) 추가 확보 — 심층 탐색 전용 (거래내역 세그 상태를 건드리지 않음)
+  Future<bool> _fetchBuyPage() async {
+    final ouid = await _resolveOuid();
+    if (ouid == null) return false;
+    final offset = _offsets['buy']!;
+    final response = await http.get(
+      Uri.parse('$_apiBase/fconline/v1/user/trade'
+          '?ouid=$ouid&tradetype=buy&offset=$offset&limit=100'),
+      headers: {'x-nxopen-api-key': _apiKey!},
+    ).timeout(const Duration(seconds: 20));
+    if (response.statusCode == 429) {
+      if (mounted) {
+        setState(() =>
+            _error = '오늘 API 호출 한도를 모두 사용했습니다. 자정(00:00) 이후 다시 시도해주세요.');
+      }
+      return false;
+    }
+    final data = json.decode(utf8.decode(response.bodyBytes));
+    if (response.statusCode != 200 || data is! List) return false;
+    final rows = data.map((e) => Map<String, dynamic>.from(e)).toList();
+    if (mounted) {
+      setState(() {
+        _trades['buy']!.addAll(rows);
+        _offsets['buy'] = _offsets['buy']! + rows.length;
+        _exhausted['buy'] = rows.length < 100;
+      });
+    }
+    return rows.isNotEmpty;
+  }
+
+  /// 구매가 심층 탐색 — toEnd=false면 100건 1회, true면 소진/중단까지 반복
+  Future<void> _findMoreBuy({required bool toEnd}) async {
+    if (_deepSearching || _apiKey == null) return;
+    setState(() {
+      _deepSearching = true;
+      _deepCancel = false;
+    });
+    try {
+      while (!(_exhausted['buy'] ?? false) && !_deepCancel && mounted) {
+        final got = await _fetchBuyPage();
+        _rematchPnl();
+        if (!got) break;
+        if (!toEnd) break; // +100건 더 찾기: 1페이지만
+        if (_missingBuyCount == 0) break; // 전부 찾으면 조기 종료
+      }
+    } catch (e) {
+      print('[MarketTab] 구매가 탐색 오류: $e');
+    } finally {
+      if (mounted) setState(() => _deepSearching = false);
+    }
+  }
+
+  /// 끝까지 찾기 — 시작 전 안내 (시간 소요 + 화면 유지, 사용자 확정 문구)
+  void _confirmFindToEnd() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('끝까지 찾기'),
+        content: const Text(
+            '구매 내역을 처음부터 끝까지 확인합니다.\n'
+            '기록이 많으면 수십 초~2분가량 걸릴 수 있으며,\n'
+            '찾는 동안 앱 화면을 켜둔 채로 기다려주세요.\n'
+            '(진행 중 중단할 수 있습니다)'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _findMoreBuy(toEnd: true);
+            },
+            child: const Text('시작'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -462,9 +565,19 @@ class _MarketTabState extends State<MarketTab>
 
   // ── 키 등록됨: 거래내역 / 스쿼드 손익 ──
   Widget _buildMain() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-      child: Column(
+    return RefreshIndicator(
+      // 당겨서 새로고침: 현재 세그먼트만 재조회 (로딩 정책 2026-08-19)
+      onRefresh: () async {
+        if (_seg == 0) {
+          await _loadTrades(reset: true);
+        } else {
+          await _loadPnl();
+        }
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -501,6 +614,7 @@ class _MarketTabState extends State<MarketTab>
             ),
           if (_seg == 0) ..._buildTrades() else ..._buildPnl(),
         ],
+        ),
       ),
     );
   }
@@ -677,12 +791,72 @@ class _MarketTabState extends State<MarketTab>
           ),
         ),
       for (final p in _pnl) _pnlRow(p),
+      // 구매가 심층 탐색 (2026-08-19): 못 찾은 선수가 있으면 더 오래된 내역에서 탐색
+      if (_pnl.isNotEmpty && _missingBuyCount > 0) ...[
+        if (!(_exhausted['buy'] ?? false)) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+                '구매가를 찾지 못한 선수 $_missingBuyCount명 — '
+                '더 오래된 구매 내역(현재 ${_trades['buy']!.length}건 확인)에서 찾아볼 수 있습니다.',
+                style: TextStyle(fontSize: 11.5, color: _subColor)),
+          ),
+          const SizedBox(height: 6),
+          if (_deepSearching)
+            Row(
+              children: [
+                const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      '구매 내역 ${_trades['buy']!.length}건째 확인 중...'
+                      ' (남은 미확인 $_missingBuyCount명)',
+                      style: TextStyle(fontSize: 12, color: _subColor)),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _deepCancel = true),
+                  child: const Text('중단', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _findMoreBuy(toEnd: false),
+                    child: const Text('+100건 더 찾기',
+                        style: TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _confirmFindToEnd,
+                    child:
+                        const Text('끝까지 찾기', style: TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+              ],
+            ),
+        ] else
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+                '구매 내역 전체(${_trades['buy']!.length}건)를 확인했습니다. '
+                '남은 "-"는 구매 당시와 강화 단계가 다르거나 이적시장 구매 기록이 없는 선수입니다.',
+                style: TextStyle(fontSize: 11, color: _subColor)),
+          ),
+      ],
       if (_pnl.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Text(
-              '구매가는 이 기기에서 조회한 구매 내역(최근 500건) 기준이라\n'
-              '오래된 구매는 "-"로 표시될 수 있습니다.',
+              '구매가는 이 기기에서 조회한 구매 내역 기준입니다. '
+              '구매 후 강화로 단계가 달라진 선수는 "-"로 표시됩니다.',
               style: TextStyle(fontSize: 11, color: _subColor)),
         ),
     ];

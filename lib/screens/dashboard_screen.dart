@@ -16,6 +16,22 @@ import 'market_tab.dart';
 import 'analysis_tab.dart';
 import '../widgets/ranking_tab.dart';
 
+// ── 상태탭 A안 팔레트 (2026-08-19 색 조화: 기능·표현 전부 유지, 색만 변경) ──
+// 승·인게임 배너·일시정지 = 퍼플 토널 / 패·중지 = 로즈 / 무 = 퍼플그레이
+// 온라인 = 민트 점 + 중립 알약 / 주계정 = 퍼플 토널 테두리 알약 / 시작 = 퍼플 솔리드
+Color _wdlWin(BuildContext context) => Theme.of(context).colorScheme.primary;
+Color _wdlDraw(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF8B87A0)
+        : const Color(0xFF6E6884);
+Color _wdlLose(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFE58AA8)
+        : const Color(0xFFD1567F);
+const Color _mintDot = Color(0xFF6EE7B7); // 온라인 표시 점
+const Color _roseSolid = Color(0xFFD1567F); // 중지·취소 계열 솔리드
+const Color _purpleSolid = Color(0xFF7C3AED); // 시작·긍정 계열 솔리드
+
 class DashboardScreen extends StatefulWidget {
   final String username;
   final ApiService apiService;
@@ -434,7 +450,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
     if (result['success']) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: Colors.green),
+        SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: _purpleSolid),
       );
       await _loadStatus();
     } else {
@@ -447,7 +463,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   // 원격 제어 공통 헬퍼 (2026-07-18 원격 제어 확장) — 명령 전송 + 결과 스낵바 + 상태 갱신
   Future<void> _sendControl(String username,
       Future<Map<String, dynamic>> request, String okMsg,
-      {Color color = Colors.green}) async {
+      {Color color = _purpleSolid}) async {
     final result = await request;
     if (!mounted) return;
     if (result['success'] == true) {
@@ -469,7 +485,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final result = await widget.apiService.stopMacro(username);
     if (result['success']) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$username: 매크로 중지 명령 전송됨'), backgroundColor: Colors.orange),
+        SnackBar(content: Text('$username: 매크로 중지 명령 전송됨'), backgroundColor: _roseSolid),
       );
       await _loadStatus();
     } else {
@@ -672,33 +688,50 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ),
                     if (isPrimary) ...[
                       const SizedBox(width: 8),
+                      // 주계정 뱃지: 퍼플 토널 + 테두리 알약 (A안)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.blue,
+                          color: _wdlWin(context).withOpacity(0.14),
                           borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                              color: _wdlWin(context).withOpacity(0.55)),
                         ),
-                        child: const Text(
+                        child: Text(
                           '주 계정',
-                          style: TextStyle(color: Colors.white, fontSize: 10),
+                          style: TextStyle(
+                              color: _wdlWin(context),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700),
                         ),
                       ),
                     ],
                   ],
                 ),
+                // 온라인 뱃지: 민트 점 + 중립 알약, 오프라인은 회색 점 파생 (A안)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isOnline ? Colors.green : Colors.grey,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white.withOpacity(0.06)
+                        : Colors.black.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.circle, size: 10, color: Colors.white),
+                      Icon(Icons.circle,
+                          size: 10,
+                          color: isOnline ? _mintDot : Colors.grey),
                       const SizedBox(width: 4),
                       Text(
                         isOnline ? '온라인' : '오프라인',
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
+                        style: TextStyle(
+                            color: Theme.of(context).brightness ==
+                                    Brightness.dark
+                                ? Colors.white70
+                                : Colors.grey.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
                       ),
                     ],
                   ),
@@ -721,12 +754,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 ),
                 child: Row(
                   children: [
-                    const Text(
+                    // 상대 정보 강조: 로즈 (A안 파생 — 주황 제거)
+                    Text(
                       'vs',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFFf39c12),
+                        color: _wdlLose(context),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -748,10 +782,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     const SizedBox(width: 8),
                     Text(
                       '${opponentScore ?? '-'}점',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFFf39c12),
+                        color: _wdlLose(context),
                       ),
                     ),
                   ],
@@ -759,77 +793,72 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ),
             ],
             if (ingameTime != null) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isPlaying
-                      ? Colors.green.withOpacity(0.12)
-                      : isPenaltyKick
-                          ? Colors.orange.withOpacity(0.12)
-                          : Colors.amber.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border(
-                    left: BorderSide(
-                      color: isPlaying
-                          ? Colors.green
-                          : isPenaltyKick
-                              ? Colors.orange
-                              : Colors.amber,
-                      width: 4,
+              // 인게임 배너 색 (A안): 경기중=퍼플 토널, 승부차기=민트 토널,
+              // 매칭대기=퍼플그레이 토널 — 같은 규칙 파생
+              Builder(builder: (context) {
+                final isDark =
+                    Theme.of(context).brightness == Brightness.dark;
+                final bannerColor = isPlaying
+                    ? _wdlWin(context)
+                    : isPenaltyKick
+                        ? (isDark
+                            ? _mintDot
+                            : const Color(0xFF0E9F6E))
+                        : _wdlDraw(context);
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: bannerColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border(
+                      left: BorderSide(color: bannerColor, width: 4),
                     ),
                   ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          isPlaying
-                              ? Icons.sports_soccer
-                              : isPenaltyKick
-                                  ? Icons.sports_score
-                                  : Icons.hourglass_empty,
-                          size: 16,
-                          color: isPlaying
-                              ? Colors.green[700]
-                              : isPenaltyKick
-                                  ? Colors.orange[700]
-                                  : Colors.amber[800],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          isPlaying
-                              ? '경기 중  $ingameTime'
-                              : isPenaltyKick
-                                  ? '승부차기 중'
-                                  : '매칭대기중',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: isPlaying
-                                ? Colors.green[700]
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isPlaying
+                                ? Icons.sports_soccer
                                 : isPenaltyKick
-                                    ? Colors.orange[700]
-                                    : Colors.amber[800],
+                                    ? Icons.sports_score
+                                    : Icons.hourglass_empty,
+                            size: 16,
+                            color: bannerColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isPlaying
+                                ? '경기 중  $ingameTime'
+                                : isPenaltyKick
+                                    ? '승부차기 중'
+                                    : '매칭대기중',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              color: bannerColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isPlaying)
+                        Text(
+                          '${ingameMyScore ?? '-'} : ${ingameOppScore ?? '-'}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            letterSpacing: 2,
+                            color: bannerColor,
                           ),
                         ),
-                      ],
-                    ),
-                    if (isPlaying)
-                      Text(
-                        '${ingameMyScore ?? '-'} : ${ingameOppScore ?? '-'}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          letterSpacing: 2,
-                          color: Colors.green[700],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+                    ],
+                  ),
+                );
+              }),
             ],
             GridView.count(
               shrinkWrap: true,
@@ -942,9 +971,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final woTotal = wins + losses;
     final rateWo = woTotal > 0 ? (wins / woTotal * 100).toStringAsFixed(1) : '0.0';
 
-    const winColor = Color(0xFF179C4B);
-    const drawColor = Color(0xFF7D867E);
-    const loseColor = Color(0xFFD63C3C);
+    // A안 색: 승=퍼플·무=퍼플그레이·패=로즈, 박스 배경은 테마 연동
+    // (다크모드 밝은 회색 #F6F7F9 고정 해제 — 2026-08-19)
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final winColor = _wdlWin(context);
+    final drawColor = _wdlDraw(context);
+    final loseColor = _wdlLose(context);
 
     Widget countCol(String label, int value, Color color) => Expanded(
       child: Column(
@@ -960,8 +992,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[600])),
-          Text(value, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Colors.grey[850])),
+          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[isDark ? 500 : 600])),
+          Text(value, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.grey[850])),
         ],
       ),
     );
@@ -969,7 +1001,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F7F9),
+        color: isDark
+            ? Colors.white.withOpacity(0.05)
+            : const Color(0xFFF6F7F9),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -977,7 +1011,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           countCol('승', wins, winColor),
           countCol('무', draws, drawColor),
           countCol('패', losses, loseColor),
-          Container(width: 1, height: 28, color: const Color(0xFFDDE1E6)),
+          Container(width: 1, height: 28,
+              color: isDark ? Colors.white12 : const Color(0xFFDDE1E6)),
           rateCol('전체 승률', '$rateAll%'),
           rateCol('무제외 승률', '$rateWo%'),
         ],
@@ -1010,7 +1045,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           tilePadding: EdgeInsets.zero,
           title: Text(summary,
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold,
-                  color: parts.isNotEmpty ? Colors.orange[700] : null)),
+                  color: parts.isNotEmpty ? _wdlWin(context) : null)),
           children: [
             // 경기 수 예약 (N경기 후 정지 +PC종료 옵션)
             Row(children: [
@@ -1031,7 +1066,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   if (gamesValue == null || gamesValue! < 1 || gamesValue! > 999) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text('경기 수는 1~999 사이로 입력하세요.'),
-                        backgroundColor: Colors.orange));
+                        backgroundColor: _roseSolid));
                     return;
                   }
                   _sendControl(username,
@@ -1066,7 +1101,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   if (pickedTime == null) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text('정지 시각을 먼저 선택하세요.'),
-                        backgroundColor: Colors.orange));
+                        backgroundColor: _roseSolid));
                     return;
                   }
                   _sendControl(username,
@@ -1083,16 +1118,18 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   TextButton(
                       onPressed: () => _sendControl(username,
                           widget.apiService.cancelReserveStop(username),
-                          '경기 수 예약 취소 전송됨', color: Colors.orange),
-                      child: const Text('경기 수 예약 취소',
-                          style: TextStyle(fontSize: 12, color: Colors.red))),
+                          '경기 수 예약 취소 전송됨', color: _roseSolid),
+                      child: Text('경기 수 예약 취소',
+                          style: TextStyle(
+                              fontSize: 12, color: _wdlLose(context)))),
                 if (reserveTime != null)
                   TextButton(
                       onPressed: () => _sendControl(username,
                           widget.apiService.cancelReserveStopTime(username),
-                          '시간 예약 취소 전송됨', color: Colors.orange),
-                      child: const Text('시간 예약 취소',
-                          style: TextStyle(fontSize: 12, color: Colors.red))),
+                          '시간 예약 취소 전송됨', color: _roseSolid),
+                      child: Text('시간 예약 취소',
+                          style: TextStyle(
+                              fontSize: 12, color: _wdlLose(context)))),
               ]),
           ],
         ),
@@ -1137,7 +1174,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           title: Text('${labels[key]}${dirty ? ' *' : ''}',
               style: TextStyle(fontSize: 13,
                   fontWeight: dirty ? FontWeight.bold : FontWeight.normal,
-                  color: dirty ? Colors.orange[700] : null)),
+                  color: dirty ? _wdlWin(context) : null)),
           value: draft[key]!,
           onChanged: (v) {
             setState(() {
@@ -1166,7 +1203,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 children: [
                   Expanded(
                     child: Text('적용 안 된 변경 ${dirtyKeys.length}건',
-                        style: TextStyle(fontSize: 12, color: Colors.orange[700],
+                        style: TextStyle(fontSize: 12, color: _wdlWin(context),
                             fontWeight: FontWeight.bold)),
                   ),
                   TextButton(
@@ -1225,7 +1262,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$username: 설정 변경 $total건 전송됨'),
-            backgroundColor: Colors.green),
+            backgroundColor: _purpleSolid),
       );
       await _loadStatus();
     } else {
@@ -1275,13 +1312,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                               ? widget.apiService.resumeMacro(username)
                               : widget.apiService.pauseMacro(username),
                           isPaused ? '재개 명령 전송됨' : '일시정지 명령 전송됨',
-                          color: Colors.orange,
                         ),
                         icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
                         label: Text(isPaused ? '재개' : '일시정지'),
+                        // 일시정지: 퍼플 토널 (A안)
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
+                          backgroundColor: _wdlWin(context).withOpacity(0.16),
+                          foregroundColor: _wdlWin(context),
+                          elevation: 0,
                         ),
                       ),
                     ),
@@ -1291,9 +1329,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                         onPressed: () => _stopMacro(username),
                         icon: const Icon(Icons.stop),
                         label: const Text('중지'),
+                        // 중지: 로즈 토널 (A안)
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
+                          backgroundColor: _wdlLose(context).withOpacity(0.16),
+                          foregroundColor: _wdlLose(context),
+                          elevation: 0,
                         ),
                       ),
                     ),
@@ -1307,8 +1347,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     icon: const Icon(Icons.stop),
                     label: const Text('중지'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
+                      backgroundColor: _wdlLose(context).withOpacity(0.16),
+                      foregroundColor: _wdlLose(context),
+                      elevation: 0,
                     ),
                   ),
                 ),
@@ -1318,10 +1359,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   padding: const EdgeInsets.only(top: 6),
                   child: Row(
                     children: [
-                      const Icon(Icons.pause_circle, size: 14, color: Colors.orange),
+                      Icon(Icons.pause_circle,
+                          size: 14, color: _wdlWin(context)),
                       const SizedBox(width: 4),
                       Text('일시정지 중',
-                          style: TextStyle(fontSize: 12, color: Colors.orange[700],
+                          style: TextStyle(fontSize: 12, color: _wdlWin(context),
                               fontWeight: FontWeight.bold)),
                     ],
                   ),
@@ -1394,7 +1436,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('주차모드 조건을 최소 1개 이상 선택해주세요.'),
-                                backgroundColor: Colors.orange,
+                                backgroundColor: _roseSolid,
                               ),
                             );
                             return;
@@ -3312,10 +3354,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildStatItem('승', _matchStats['wins'] ?? 0, Colors.green),
-                        _buildStatItem('무', _matchStats['draws'] ?? 0, Colors.grey),
-                        _buildStatItem('패', _matchStats['losses'] ?? 0, Colors.red),
-                        _buildStatItem('승률', _matchStats['win_rate'] ?? 0, Colors.blue, isRate: true),
+                        // 승무패 색 통일 (상태탭 A안 규칙 — 2026-08-19)
+                        _buildStatItem('승', _matchStats['wins'] ?? 0, _wdlWin(context)),
+                        _buildStatItem('무', _matchStats['draws'] ?? 0, _wdlDraw(context)),
+                        _buildStatItem('패', _matchStats['losses'] ?? 0, _wdlLose(context)),
+                        _buildStatItem('승률', _matchStats['win_rate'] ?? 0, _wdlWin(context), isRate: true),
                       ],
                     ),
                   ),
@@ -3420,9 +3463,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   Widget _buildMatchCard(Map<String, dynamic> match) {
     final result = match['result'] ?? '';
-    Color resultColor = Colors.grey;
-    if (result.contains('승')) resultColor = Colors.green;
-    else if (result.contains('패')) resultColor = Colors.red;
+    // 승무패 색 통일 (상태탭 A안 규칙 — 2026-08-19)
+    Color resultColor = _wdlDraw(context);
+    if (result.contains('승')) resultColor = _wdlWin(context);
+    else if (result.contains('패')) resultColor = _wdlLose(context);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -3621,15 +3665,13 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
                         physics: const BouncingScrollPhysics(),
                         itemBuilder: (context, index) {
                           final r = widget.results[index];
-                          // 인게임 스타일 사각 타일 (승 초록 / 무 회백 / 패 빨강)
+                          // 인게임 스타일 사각 타일 — A안 색 (승 퍼플 / 무 퍼플그레이 / 패 로즈)
                           final bg = r == 'WIN'
-                              ? const Color(0xFF1FAB55)
+                              ? Theme.of(context).colorScheme.primary
                               : r == 'DRAW'
-                                  ? const Color(0xFFCFD6CF)
-                                  : const Color(0xFFE04B4B);
-                          final fg = r == 'DRAW'
-                              ? const Color(0xFF39413A)
-                              : Colors.white;
+                                  ? const Color(0xFF8B87A0)
+                                  : _roseSolid;
+                          const fg = Colors.white;
                           final ch = r == 'WIN' ? '승' : r == 'DRAW' ? '무' : '패';
                           return Center(
                             child: Container(
@@ -3676,11 +3718,13 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
             const SizedBox(width: 8),
-            _badge('승 $wins', const Color(0xFF1FAB55), Colors.white),
+            // A안 색 (승 퍼플 / 무 퍼플그레이 / 패 로즈)
+            _badge('승 $wins', Theme.of(context).colorScheme.primary,
+                Colors.white),
             const SizedBox(width: 4),
-            _badge('무 $draws', const Color(0xFFCFD6CF), const Color(0xFF39413A)),
+            _badge('무 $draws', const Color(0xFF8B87A0), Colors.white),
             const SizedBox(width: 4),
-            _badge('패 $losses', const Color(0xFFE04B4B), Colors.white),
+            _badge('패 $losses', _roseSolid, Colors.white),
           ],
         ),
       ],

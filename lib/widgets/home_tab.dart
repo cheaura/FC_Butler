@@ -186,6 +186,47 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
+  /// TOP3 순위 금·은·동 원형 배지 — 랭킹 탭 _rankRow 색 체계와 동일
+  Widget _medalBadge(String rankStr) {
+    Gradient? gradient;
+    Color textColor;
+    switch (int.tryParse(rankStr)) {
+      case 1:
+        gradient = const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFF2C14E), Color(0xFFC9922A)]);
+        textColor = const Color(0xFF3A2A05);
+        break;
+      case 2:
+        gradient = const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFC9CDD8), Color(0xFF9AA0AE)]);
+        textColor = const Color(0xFF2A2E38);
+        break;
+      case 3:
+        gradient = const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFD89A6A), Color(0xFFA96F42)]);
+        textColor = const Color(0xFF3A2412);
+        break;
+      default:
+        gradient = null;
+        textColor = _subColor;
+    }
+    return Container(
+      width: 14,
+      height: 14,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(shape: BoxShape.circle, gradient: gradient),
+      child: Text(rankStr,
+          style: TextStyle(
+              fontSize: 8.5, fontWeight: FontWeight.w800, color: textColor)),
+    );
+  }
+
   Widget _tileLabel(String text, {Widget? trailing}) {
     return Row(
       children: [
@@ -342,16 +383,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        SizedBox(
-                                          width: 12,
-                                          child: Text(t['rank'] ?? '',
-                                              style: TextStyle(
-                                                  fontSize: 10,
-                                                  fontWeight:
-                                                      FontWeight.w800,
-                                                  color: _subColor)),
-                                        ),
-                                        const SizedBox(width: 2),
+                                        // 랭킹 탭과 동일한 금·은·동 원형 배지 (2026-08-19 사용자 지시)
+                                        _medalBadge(t['rank'] ?? ''),
+                                        const SizedBox(width: 4),
                                         Expanded(
                                           child: Text(t['coach'] ?? '',
                                               maxLines: 1,

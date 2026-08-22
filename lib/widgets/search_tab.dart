@@ -5,8 +5,8 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/recent_search_store.dart';
 import '../screens/match_detail_screen.dart';
-import 'badges.dart';
 import 'pill_tabs.dart';
+import 'player_field_card.dart';
 
 /// 검색 탭으로 전달되는 검색 요청 (홈 타일·최근 감독에서 사용)
 class SearchRequest {
@@ -37,17 +37,28 @@ class _SearchTabState extends State<SearchTab>
   bool _backfilling = false;
   String? _error;
   Map<String, dynamic>? _result; // lookup/manager 응답
-  Map<String, dynamic>? _matches; // lookup/matches 응답
+  Map<String, dynamic>? _matches; // lookup/matches 응답 (항상 미필터 전체 — 경기 세그용)
+  // 필터된 전적 응답 (전적 세그 전용 — 2026-08-19 필터 UX 개편: 경기 세그는 항상 전체 유지)
+  Map<String, dynamic>? _filteredMatches;
+  bool _filteredLoading = false;
+  int _visibleFiltered = 100; // 필터된 경기 목록 표시 수, 더 보기 +100씩
   List<Map<String, dynamic>> _recent = [];
   List<String> _clubs = [];
   String _club = '';
   int _visibleMatches = 100; // 최초 100경기 표시, 더 보기 +100씩
   bool _autoBackfilled = false;
-  int _resultSeg = 0; // 0=개요, 1=전적, 2=경기, 3=채굴
+  int _resultSeg = 0; // 0=개요, 1=스쿼드, 2=전적, 3=경기, 4=채굴
   // 채굴량 조회 (승리당 FC — 챔피언스/슈퍼 챔피언스만 지급)
+  // 기간별 캐시: 오늘/7일 토글 재호출 방지, 실패 시 이전 데이터 유지 (로딩 정책 2026-08-19)
   bool _miningLoading = false;
-  Map<String, dynamic>? _mining;
+  final Map<int, Map<String, dynamic>> _miningCache = {};
   int _miningPeriod = 0; // 0=오늘, 1=7일 (30일·전체는 과다 수집 방지로 제외 — 사용자 지정)
+
+  Map<String, dynamic>? get _mining => _miningCache[_miningPeriod];
+
+  // 필터(클럽/키워드) 활성 여부 — 활성 시 전적 세그에 필터된 경기 목록 표시
+  bool get _filterActive =>
+      _club.isNotEmpty || _kwController.text.trim().isNotEmpty;
   // 감독 스쿼드 조회 (최근 경기 라인업 — 서버 user-squad)
   bool _squadLoading = false;
   Map<String, dynamic>? _squad;
@@ -76,7 +87,9 @@ class _SearchTabState extends State<SearchTab>
         setState(() {
           _result = null;
           _matches = null;
-          _mining = null;
+          _filteredMatches = null;
+          _miningCache.clear();
+          _squad = null;
           _error = null;
         });
       } else {
@@ -120,10 +133,12 @@ class _SearchTabState extends State<SearchTab>
       _error = null;
       _result = null;
       _matches = null;
+      _filteredMatches = null;
       _visibleMatches = 100;
+      _visibleFiltered = 100;
       _autoBackfilled = false;
       _resultSeg = 0;
-      _mining = null;
+      _miningCache.clear();
       _squad = null;
     });
     try {
@@ -158,15 +173,16 @@ class _SearchTabState extends State<SearchTab>
     if (name.isEmpty) return;
     setState(() => _matchesLoading = true);
     try {
+      // 항상 미필터 전체 조회 — 경기 세그는 필터와 무관하게 전체 유지 (2026-08-19)
       final response = await http.get(
         Uri.parse('${ApiService.baseUrl}/api/user/lookup/matches'
-            '?name=${Uri.encodeComponent(name)}&mode=$_mode'
-            '&club=${Uri.encodeComponent(_club)}'
-            '&kw=${Uri.encodeComponent(_kwController.text.trim())}'),
+            '?name=${Uri.encodeComponent(name)}&mode=$_mode'),
       ).timeout(const Duration(seconds: 40));
       final data = json.decode(response.body);
       if (mounted && data['success'] == true) {
         setState(() => _matches = data);
+        // 필터가 걸려 있으면 필터 결과도 갱신
+        if (_filterActive) _loadFilteredMatches();
         // 최초 조회 시 100경기가 안 되면 자동으로 한 번 과거 수집 (+100)
         final stored = (data['stored_total'] as num? ?? 0).toInt();
         if (!_autoBackfilled &&
@@ -184,6 +200,36 @@ class _SearchTabState extends State<SearchTab>
     }
   }
 
+  // 필터(클럽/키워드) 적용 조회 — 전적 세그 전용, _matches(전체)는 건드리지 않음
+  Future<void> _loadFilteredMatches() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    if (!_filterActive) {
+      setState(() => _filteredMatches = null);
+      return;
+    }
+    setState(() {
+      _filteredLoading = true;
+      _visibleFiltered = 100;
+    });
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/api/user/lookup/matches'
+            '?name=${Uri.encodeComponent(name)}&mode=$_mode'
+            '&club=${Uri.encodeComponent(_club)}'
+            '&kw=${Uri.encodeComponent(_kwController.text.trim())}'),
+      ).timeout(const Duration(seconds: 40));
+      final data = json.decode(response.body);
+      if (mounted && data['success'] == true) {
+        setState(() => _filteredMatches = data);
+      }
+    } catch (e) {
+      print('[SearchTab] 필터 전적 로드 실패: $e');
+    } finally {
+      if (mounted) setState(() => _filteredLoading = false);
+    }
+  }
+
   Future<void> _backfill() async {
     final name = _nameController.text.trim();
     if (name.isEmpty || _backfilling) return;
@@ -191,13 +237,13 @@ class _SearchTabState extends State<SearchTab>
     try {
       final response = await http.get(
         Uri.parse('${ApiService.baseUrl}/api/user/lookup/backfill'
-            '?name=${Uri.encodeComponent(name)}&mode=$_mode'
-            '&club=${Uri.encodeComponent(_club)}'
-            '&kw=${Uri.encodeComponent(_kwController.text.trim())}'),
+            '?name=${Uri.encodeComponent(name)}&mode=$_mode'),
       ).timeout(const Duration(seconds: 90));
       final data = json.decode(response.body);
       if (mounted && data['success'] == true) {
         setState(() => _matches = data);
+        // 필터가 걸려 있으면 필터 결과도 새 수집분 반영
+        if (_filterActive) _loadFilteredMatches();
         final bf = data['backfill'];
         if (bf != null && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -218,6 +264,14 @@ class _SearchTabState extends State<SearchTab>
 
   Color get _accent => Theme.of(context).colorScheme.primary;
   Color get _subColor => Colors.grey.shade500;
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  // 승무패 색 (상태탭 A안 규칙: 승=퍼플·무=퍼플그레이·패=로즈, 라이트는 명도 파생)
+  Color get _winColor => _accent;
+  Color get _drawColor =>
+      _isDark ? const Color(0xFF8B87A0) : const Color(0xFF6E6884);
+  Color get _loseColor =>
+      _isDark ? const Color(0xFFE58AA8) : const Color(0xFFD1567F);
 
   Widget _tierLogo(String? url, {double size = 44}) {
     if (url == null || url.isEmpty) {
@@ -271,12 +325,56 @@ class _SearchTabState extends State<SearchTab>
     );
   }
 
+  // 당겨서 새로고침 — 현재 세그먼트의 데이터만 재조회 (로딩 정책 2026-08-19)
+  Future<void> _refreshCurrent() async {
+    if (_result == null || _result!['found'] != true) {
+      await _loadClubs(); // 결과가 없으면 갱신할 데이터 없음 (클럽 목록만)
+      return;
+    }
+    switch (_resultSeg) {
+      case 0:
+        await _refreshOverview();
+        break;
+      case 1:
+        await _loadSquad(force: true);
+        break;
+      case 2:
+      case 3:
+        await _loadMatches();
+        break;
+      case 4:
+        await _loadMining(force: true);
+        break;
+    }
+  }
+
+  // 개요(현재 랭킹)만 재조회 — 세그·다른 캐시는 건드리지 않음
+  Future<void> _refreshOverview() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/api/user/lookup/manager'
+            '?name=${Uri.encodeComponent(name)}&mode=$_mode'),
+      ).timeout(const Duration(seconds: 25));
+      final data = json.decode(response.body);
+      if (mounted && response.statusCode == 200 && data['success'] == true) {
+        setState(() => _result = data);
+      }
+    } catch (e) {
+      print('[SearchTab] 개요 새로고침 실패: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-      child: Column(
+    return RefreshIndicator(
+      onRefresh: _refreshCurrent,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('감독 검색',
@@ -311,6 +409,7 @@ class _SearchTabState extends State<SearchTab>
             _buildRecentList(),
           if (!_loading && _result != null) ..._buildResult(),
         ],
+        ),
       ),
     );
   }
@@ -482,6 +581,25 @@ class _SearchTabState extends State<SearchTab>
     ];
   }
 
+  /// 등급명 → 넥슨 티어 로고 URL.
+  /// 등급 순서(높은 순) = ico_rank0~20 순번 — 2026-08-19 update_2026 아이콘 21종 실측 확인
+  /// (슈챔 왕관·챌린저 청록·마스터 초록·월클 보라·프로 주황·유망주 살구로 그룹 일치 검증).
+  static const List<String> _tierOrder = [
+    '슈퍼 챔피언스', '챔피언스', '슈퍼 챌린지',
+    '챌린저1', '챌린저2', '챌린저3',
+    '마스터1', '마스터2', '마스터3',
+    '월드클래스1', '월드클래스2', '월드클래스3',
+    '프로1', '프로2', '프로3',
+    '세미프로1', '세미프로2', '세미프로3',
+    '유망주1', '유망주2', '유망주3',
+  ];
+
+  String? _tierIconUrl(String tier) {
+    final idx = _tierOrder.indexOf(tier.trim());
+    if (idx < 0) return null;
+    return 'https://ssl.nexon.com/s2/game/fo4/obt/rank/large/update_2026/ico_rank${idx}_m.png';
+  }
+
   // ── 개요 세그: 현재 랭킹 + 역대 최고 등급 ──
   List<Widget> _buildOverview(Map<String, dynamic> d) {
     final maxDiv = _result!['max_division'] as Map<String, dynamic>?;
@@ -512,6 +630,16 @@ class _SearchTabState extends State<SearchTab>
                         child: Text(entry[1],
                             style:
                                 TextStyle(fontSize: 13, color: _subColor))),
+                    // 등급명 앞 티어 로고 (텍스트 크기에 맞춤 — 2026-08-19 사용자 지시)
+                    if (_tierIconUrl(maxDiv[entry[0]]['tier'] ?? '') != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: Image.network(
+                          _tierIconUrl(maxDiv[entry[0]]['tier'] ?? '')!,
+                          height: 20,
+                          errorBuilder: (c, e, s) => const SizedBox.shrink(),
+                        ),
+                      ),
                     Text(maxDiv[entry[0]]['tier'] ?? '',
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w800)),
@@ -525,7 +653,9 @@ class _SearchTabState extends State<SearchTab>
     ];
   }
 
-  // ── 전적 세그: 승무패 + 필터 + 클럽전 + 포메이션 승률/상성 ──
+  // ── 전적 세그: 승무패 + 필터 + 포메이션 승률/상성 ──
+  // 2026-08-19 개편: 상대전적 섹션 제거(사용자 확정), 필터 활성 시 그 자리에
+  // 필터된 경기 목록(탭 → 경기분석) 표시. 경기 세그는 항상 전체 유지.
   List<Widget> _buildRecordSeg() {
     if (_matchesLoading && _matches == null) {
       return [
@@ -535,7 +665,8 @@ class _SearchTabState extends State<SearchTab>
         ),
       ];
     }
-    final m = _matches;
+    // 필터 활성 시 요약·포메이션도 필터된 응답 기준 (기존 동작 유지)
+    final m = _filterActive ? (_filteredMatches ?? _matches) : _matches;
     if (m == null || m['found'] != true) {
       return [
         _sectionCard(title: '전적', children: [
@@ -547,17 +678,19 @@ class _SearchTabState extends State<SearchTab>
     final summary = Map<String, dynamic>.from(m['summary'] ?? {});
     final myTactics = (m['my_tactics'] as List? ?? []);
     final oppTactics = (m['opp_tactics'] as List? ?? []);
-    final clubWar = m['club_war'] as List?;
     final total = summary['total'] ?? 0;
+    final filteredList =
+        _filterActive ? (_filteredMatches?['matches'] as List? ?? []) : [];
     return [
       _sectionCard(title: '전적 (수집 ${m['stored_total']}경기)', children: [
         Row(
           children: [
-            _wdlBox('승', summary['win'] ?? 0, Colors.blue),
+            // 승무패 색: 전체 UI 톤 통일 — 승=퍼플·무=퍼플그레이·패=로즈 (상태탭 A안 규칙)
+            _wdlBox('승', summary['win'] ?? 0, _winColor),
             const SizedBox(width: 6),
-            _wdlBox('무', summary['draw'] ?? 0, Colors.grey),
+            _wdlBox('무', summary['draw'] ?? 0, _drawColor),
             const SizedBox(width: 6),
-            _wdlBox('패', summary['lose'] ?? 0, Colors.red),
+            _wdlBox('패', summary['lose'] ?? 0, _loseColor),
             const Spacer(),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -582,7 +715,7 @@ class _SearchTabState extends State<SearchTab>
                 style: TextStyle(fontSize: 11, color: _subColor)),
           ),
         const SizedBox(height: 10),
-        // 필터 (클럽 / 키워드) — 전적·경기 세그 공통 적용
+        // 필터 (클럽 / 키워드) — 전적 세그 전용 (경기 세그는 항상 전체)
         Row(
           children: [
             Expanded(
@@ -596,7 +729,7 @@ class _SearchTabState extends State<SearchTab>
                 ],
                 onChanged: (v) {
                   setState(() => _club = v ?? '');
-                  _loadMatches();
+                  _loadFilteredMatches();
                 },
               ),
             ),
@@ -605,7 +738,7 @@ class _SearchTabState extends State<SearchTab>
               child: TextField(
                 controller: _kwController,
                 textInputAction: TextInputAction.search,
-                onSubmitted: (_) => _loadMatches(),
+                onSubmitted: (_) => _loadFilteredMatches(),
                 decoration: const InputDecoration(
                   hintText: '상대명 키워드',
                   isDense: true,
@@ -616,30 +749,37 @@ class _SearchTabState extends State<SearchTab>
             ),
           ],
         ),
-        if (m['filtered_total'] != m['stored_total'])
+        if (_filterActive && _filteredMatches != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text('필터 결과 ${m['filtered_total']}경기',
+            child: Text('필터 결과 ${_filteredMatches!['filtered_total']}경기',
                 style: TextStyle(fontSize: 11, color: _subColor)),
           ),
       ]),
-      if (clubWar != null && clubWar.isNotEmpty)
-        _sectionCard(title: '클럽원별 상대 전적', children: [
-          for (final w in clubWar.take(15))
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  Expanded(
-                      child: Text(w['opp'] ?? '',
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600))),
-                  Text('${w['win']}승 ${w['draw']}무 ${w['lose']}패',
-                      style: TextStyle(fontSize: 12, color: _subColor)),
-                ],
+      // 필터 활성 시: 필터된 경기 목록 (탭 → 경기분석)
+      if (_filterActive) ...[
+        if (_filteredLoading && _filteredMatches == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (filteredList.isNotEmpty)
+          _sectionCard(title: '필터된 경기 목록', children: [
+            for (final match in filteredList.take(_visibleFiltered))
+              _matchRow(match),
+            if (filteredList.length > _visibleFiltered)
+              TextButton(
+                onPressed: () => setState(() => _visibleFiltered += 100),
+                child: Text(
+                    '더 보기 (${filteredList.length - _visibleFiltered}경기 남음)'),
               ),
-            ),
-        ]),
+          ])
+        else if (_filteredMatches != null)
+          _sectionCard(title: '필터된 경기 목록', children: [
+            Text('필터 조건에 맞는 경기가 없습니다.',
+                style: TextStyle(fontSize: 13, color: _subColor)),
+          ]),
+      ],
       if (myTactics.isNotEmpty)
         _sectionCard(title: '내 포메이션별 승률', children: [
           for (final t in myTactics.take(6)) _tacticRow(t),
@@ -672,9 +812,9 @@ class _SearchTabState extends State<SearchTab>
     }
     final matches = (m['matches'] as List? ?? []);
     return [
+      // 경기 세그는 필터와 무관하게 항상 전체 경기 표시 (2026-08-19 확정)
       _sectionCard(
-          title:
-              '경기 목록 (${matches.length}경기${m['filtered_total'] != m['stored_total'] ? ' — 필터 적용' : ''})',
+          title: '경기 목록 (${matches.length}경기)',
           children: [
             for (final match in matches.take(_visibleMatches))
               _matchRow(match),
@@ -710,16 +850,17 @@ class _SearchTabState extends State<SearchTab>
   String _dateStr(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  Future<void> _loadMining() async {
+  Future<void> _loadMining({bool force = false}) async {
     final name = _nameController.text.trim();
     if (name.isEmpty || _miningLoading) return;
-    setState(() {
-      _miningLoading = true;
-      _mining = null;
-    });
+    final period = _miningPeriod;
+    // 기간별 캐시 유지 — 탭/기간 전환 재호출 없음, 당겨서 새로고침만 재조회 (2026-08-19)
+    if (!force && _miningCache[period] != null) return;
+    // 이전 데이터를 비우지 않는다 — 성공 시에만 교체 (실패 시 이전 데이터 유지)
+    setState(() => _miningLoading = true);
     try {
       final now = DateTime.now();
-      final from = _miningPeriod == 0
+      final from = period == 0
           ? _dateStr(now)
           : _dateStr(now.subtract(const Duration(days: 6)));
       final response = await http.get(
@@ -728,10 +869,15 @@ class _SearchTabState extends State<SearchTab>
       ).timeout(const Duration(seconds: 240)); // 첫 조회는 기간 전체 수집이라 오래 걸릴 수 있음
       final data = json.decode(response.body);
       if (mounted && data['success'] == true) {
-        setState(() => _mining = data);
+        setState(
+            () => _miningCache[period] = Map<String, dynamic>.from(data));
       }
     } catch (e) {
       print('[SearchTab] 채굴량 로드 실패: $e');
+      if (mounted && _miningCache[period] == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('채굴량 조회에 실패했습니다. 아래로 당겨 다시 시도하세요.')));
+      }
     } finally {
       if (mounted) setState(() => _miningLoading = false);
     }
@@ -744,12 +890,12 @@ class _SearchTabState extends State<SearchTab>
         selectedIndex: _miningPeriod,
         onSelected: (i) {
           setState(() => _miningPeriod = i);
-          _loadMining();
+          _loadMining(); // 기간별 캐시 있으면 즉시 표시, 없을 때만 조회
         },
       ),
       const SizedBox(height: 12),
     ];
-    if (_miningLoading) {
+    if (_miningLoading && _mining == null) {
       widgets.add(const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(child: CircularProgressIndicator()),
@@ -810,6 +956,14 @@ class _SearchTabState extends State<SearchTab>
                         fontSize: 13, fontWeight: FontWeight.w700)),
                 Text('$totalMatches경기 기준',
                     style: TextStyle(fontSize: 11, color: _subColor)),
+                // 7일 선택 시 1일 평균 (오늘 포함 최근 7일 ÷ 7 — 2안: 우측 요약 열)
+                if (_miningPeriod == 1)
+                  Text(
+                      '일평균 ${((m['total_fc'] as num? ?? 0) / 7).round()} FC',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: _accent)),
               ],
             ),
           ],
@@ -841,7 +995,7 @@ class _SearchTabState extends State<SearchTab>
         if (otherWins > 0)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('지급 없는 티어의 승리 $otherWins건 (챔피언스 미만)',
+            child: Text('챔피언스 미만 승리 $otherWins건',
                 style: TextStyle(fontSize: 11.5, color: _subColor)),
           ),
         if (unknownWins > 0)
@@ -855,7 +1009,8 @@ class _SearchTabState extends State<SearchTab>
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-                '기간 내 경기가 많아 일부만 수집했습니다. 다시 조회하면 이어서 수집됩니다.',
+                '기간 내 경기가 많아 일부만 수집했습니다. 다시 조회하면 이어서 수집됩니다.'
+                '${_miningPeriod == 1 ? ' 일평균도 수집된 경기 기준입니다.' : ''}',
                 style: TextStyle(fontSize: 11.5, color: Colors.orange)),
           ),
       ]),
@@ -868,13 +1023,12 @@ class _SearchTabState extends State<SearchTab>
   }
 
   // ── 스쿼드 세그: 감독의 최근 경기 라인업 (서버 user-squad — !라인업 방식) ──
-  Future<void> _loadSquad() async {
+  Future<void> _loadSquad({bool force = false}) async {
     final name = _nameController.text.trim();
     if (name.isEmpty || _squadLoading) return;
-    setState(() {
-      _squadLoading = true;
-      _squad = null;
-    });
+    if (!force && _squad != null && _squad!['success'] == true) return;
+    // 이전 데이터를 비우지 않는다 — 성공 시에만 교체 (로딩 정책 2026-08-19)
+    setState(() => _squadLoading = true);
     try {
       final mode = _mode == '1vs1' ? '1vs1' : 'manager';
       final response = await http.get(
@@ -882,7 +1036,15 @@ class _SearchTabState extends State<SearchTab>
             '?name=${Uri.encodeComponent(name)}&mode=$mode'),
       ).timeout(const Duration(seconds: 40));
       final data = json.decode(response.body);
-      if (mounted) setState(() => _squad = Map<String, dynamic>.from(data));
+      if (mounted) {
+        final parsed = Map<String, dynamic>.from(data);
+        // 실패 응답은 보여줄 이전 데이터가 없을 때만 채택 (안내 문구 표시용)
+        if (parsed['success'] == true ||
+            _squad == null ||
+            _squad!['success'] != true) {
+          setState(() => _squad = parsed);
+        }
+      }
     } catch (e) {
       print('[SearchTab] 스쿼드 로드 실패: $e');
     } finally {
@@ -891,7 +1053,7 @@ class _SearchTabState extends State<SearchTab>
   }
 
   List<Widget> _buildSquadSeg() {
-    if (_squadLoading) {
+    if (_squadLoading && _squad == null) {
       return const [
         Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
@@ -962,81 +1124,20 @@ class _SearchTabState extends State<SearchTab>
                     final fx = coord[0] / 100.0;
                     final fy = (85 - coord[1]) / 100.0;
                     final spid = (p['spid'] as num?)?.toInt();
+                    // 공용 카드 (2026-08-19 재확정 배치):
+                    // 좌상 POS·아래 신규특성 / 좌하 시즌·우하 강화 (카드 내부 처리)
                     return Positioned(
                       left: (w - cardW) * fx,
-                      top: 8 + (h - cardW * 0.62 - 46) * fy,
-                      child: SizedBox(
-                        width: cardW,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Container(
-                                  width: cardW * 0.60,
-                                  height: cardW * 0.60,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.black26,
-                                    border: Border.all(
-                                        color: Colors.white70, width: 1.4),
-                                  ),
-                                  child: ClipOval(
-                                    child: Image.network(
-                                      'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png',
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (c, e, st) => const Icon(
-                                          Icons.person,
-                                          color: Colors.white70,
-                                          size: 18),
-                                    ),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: -5,
-                                  left: -7,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 3.5, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      color: posColor(pos),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                        kSpposRole[pos]?.toUpperCase() ?? '',
-                                        style: const TextStyle(
-                                            fontSize: 7.5,
-                                            fontWeight: FontWeight.w800,
-                                            color: Colors.white)),
-                                  ),
-                                ),
-                                Positioned(
-                                  top: -5,
-                                  right: -7,
-                                  child: GradeBadge(
-                                      grade:
-                                          (p['grade'] as num? ?? 1).toInt(),
-                                      fontSize: 7.5),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text('${p['name']}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                    shadows: [
-                                      Shadow(
-                                          color: Colors.black87,
-                                          blurRadius: 3)
-                                    ])),
-                            SeasonBadge(spid: spid, height: 9),
-                          ],
-                        ),
+                      top: 8 + (h - cardW * 0.62 - 50) * fy,
+                      child: PlayerFieldCard(
+                        cardW: cardW,
+                        spPos: pos,
+                        spid: spid,
+                        faceUrl:
+                            'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png',
+                        name: '${p['name']}',
+                        grade: (p['grade'] as num? ?? 1).toInt(),
+                        seasonFallback: p['season']?.toString(),
                       ),
                     );
                   }),
@@ -1103,7 +1204,8 @@ class _SearchTabState extends State<SearchTab>
     final result = match['result']?.toString() ?? '';
     final isWin = result.contains('승');
     final isLose = result.contains('패');
-    final color = isWin ? Colors.blue : (isLose ? Colors.red : Colors.grey);
+    // 승무패 색 통일 (상태탭 A안 규칙과 동일)
+    final color = isWin ? _winColor : (isLose ? _loseColor : _drawColor);
     return InkWell(
       onTap: match['match_id'] == null
           ? null

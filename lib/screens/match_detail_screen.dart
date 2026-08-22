@@ -5,6 +5,7 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../widgets/badges.dart';
 import '../widgets/pill_tabs.dart';
+import '../widgets/player_field_card.dart';
 
 /// 경기별 분석 화면 — 전적 목록에서 경기 탭으로 진입.
 /// 상단에 양팀 비교 스트립(구단가치·팀컬러·순위·포메이션 — "구단가치 차이가 얼마나
@@ -455,6 +456,17 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
   }
 
   Widget _fieldView(List<dynamic> players) {
+    // 평점 최고/최저 선수 판정 (배지 색이 아이콘 역할 — 최고 금색+★, 최저 로즈+▽)
+    num? maxRating;
+    num? minRating;
+    for (final p in players) {
+      final r = p['status']?['spRating'] as num?;
+      if (r == null) continue;
+      if (maxRating == null || r > maxRating) maxRating = r;
+      if (minRating == null || r < minRating) minRating = r;
+    }
+    final distinct = maxRating != null && maxRating != minRating;
+
     return AspectRatio(
       aspectRatio: 0.72,
       child: LayoutBuilder(
@@ -481,12 +493,25 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                     final coord = kRoleCoord[role] ?? const [50, 40];
                     final fx = coord[0] / 100.0;
                     final fy = (85 - coord[1]) / 100.0;
+                    final rating = p['status']?['spRating'] as num?;
                     return Positioned(
                       left: (w - cardW) * fx,
-                      top: 8 + (h - cardW * 0.62 - 52) * fy,
-                      child: GestureDetector(
+                      top: 8 + (h - cardW * 0.62 - 56) * fy,
+                      // 공용 카드 (2026-08-19 재확정 배치):
+                      // 좌상 POS·아래 신규특성 / 좌하 시즌·우하 강화 / 평점=선수명 아래 알약
+                      child: PlayerFieldCard(
+                        cardW: cardW,
+                        spPos: pos,
+                        spid: p['spid'] as num?,
+                        faceUrl: p['face_url']?.toString(),
+                        name: '${p['name']}',
+                        grade: (p['grade'] as num?)?.toInt() ?? 1,
+                        rating: rating,
+                        isBestRating: rating != null && rating == maxRating,
+                        isWorstRating:
+                            distinct && rating != null && rating == minRating,
+                        seasonFallback: p['season']?.toString(),
                         onTap: () => _showPlayerStats(p),
-                        child: _fieldCard(p, cardW),
                       ),
                     );
                   }),
@@ -494,96 +519,6 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
             ),
           );
         },
-      ),
-    );
-  }
-
-  // 필드 선수 카드: 얼굴 + POS 배지 + 강화 배지 + 이름 + 시즌·평점
-  Widget _fieldCard(dynamic p, double cardW) {
-    final pos = (p['position'] as num?)?.toInt() ?? 14;
-    final grade = (p['grade'] as num?)?.toInt() ?? 1;
-    final rating = (p['status']?['spRating'] as num?);
-    return SizedBox(
-      width: cardW,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: cardW * 0.60,
-                height: cardW * 0.60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black26,
-                  border: Border.all(color: Colors.white70, width: 1.4),
-                ),
-                child: ClipOval(
-                  child: Image.network(
-                    p['face_url'] ?? '',
-                    fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) => const Icon(Icons.person,
-                        color: Colors.white70, size: 18),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: -5,
-                left: -7,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 3.5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: posColor(pos),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(kSpposRole[pos]?.toUpperCase() ?? '',
-                      style: const TextStyle(
-                          fontSize: 7.5,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white)),
-                ),
-              ),
-              Positioned(
-                top: -5,
-                right: -7,
-                child: GradeBadge(grade: grade, fontSize: 7.5),
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${p['name']}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-                shadows: [Shadow(color: Colors.black87, blurRadius: 3)]),
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SeasonBadge(
-                  spid: p['spid'] as num?,
-                  height: 9,
-                  fallbackText: p['season']?.toString()),
-              if (rating != null) ...[
-                const SizedBox(width: 2),
-                Text(rating.toStringAsFixed(1),
-                    style: const TextStyle(
-                        fontSize: 8,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFFD9F2DD),
-                        shadows: [
-                          Shadow(color: Colors.black87, blurRadius: 3)
-                        ])),
-              ],
-            ],
-          ),
-        ],
       ),
     );
   }

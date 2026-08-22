@@ -18,7 +18,7 @@ class MoreTab extends StatefulWidget {
 
 class _MoreTabState extends State<MoreTab> {
   final _apiService = ApiService();
-  static const String _appVersion = '1.0.0';
+  static const String _appVersion = '1.0.2';
 
   Color get _accent => Theme.of(context).colorScheme.primary;
   Color get _subColor => Colors.grey.shade500;
