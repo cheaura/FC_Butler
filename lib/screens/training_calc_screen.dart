@@ -10,6 +10,7 @@ import '../services/ovr_formula.dart';
 /// 데이터: `/api/user/squad/player-stats?spid=` (0강 세부 능력치 34종 + eachOvr 28)
 /// 공식: [OvrFormula] — OVR = 내림(Σ (0강 스탯 + 강화 보너스 + 훈련치) × 가중치 / 100)
 /// 강화·팀컬러 '전체 능력치'는 전 스탯 균등 가산이라 같은 공식으로 계산된다.
+/// 집중훈련 규칙(사용자 확인 08-22): 10강 이하 능력치 5개 · 11강 이상 6개 선택, 선택한 능력치마다 +2.
 class TrainingCalcScreen extends StatefulWidget {
   final int spid;
   final String name;
@@ -40,9 +41,12 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
     ['lwb', 'LWB/RWB'], ['gk', 'GK'],
   ];
 
+  static const _trainStep = 2; // 선택 능력치 1개당 +2
+  static int _trainSlots(int grade) => grade >= 11 ? 6 : 5;
+
   Map<String, int>? _base; // 0강 세부 능력치
   List<int> _eachOvr = [];
-  final Map<String, int> _train = {};
+  final Map<String, int> _train = {}; // 선택한 능력치 → +2
   late int _grade = widget.grade;
   late String _pos = 'st';
   String? _error;
@@ -102,16 +106,42 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
     return out;
   }
 
-  int get _trainTotal => _train.values.fold(0, (a, b) => a + b);
+  int get _slots => _trainSlots(_grade);
 
-  /// 다음 OVR까지 단일 능력치 최소 포인트 상위 3
-  List<_Rec> _recommend(double sum) {
-    final need = sum.floor() + 1 - sum;
-    final recs = OvrFormula.weightsFor(_pos)
-        .map((e) => _Rec(e.key, e.value, ((need * 100 - 1e-9) / e.value).ceil().clamp(1, 999)))
-        .toList()
-      ..sort((a, b) => a.pts != b.pts ? a.pts.compareTo(b.pts) : b.weight.compareTo(a.weight));
-    return recs.take(3).toList();
+  /// 강화 단계가 내려가 한도를 넘으면 가중치 낮은 것부터 해제
+  void _trimTrain() {
+    final max = _slots;
+    if (_train.length <= max) return;
+    final order = OvrFormula.weightsFor(_pos).map((e) => e.key).toList();
+    final keys = _train.keys.toList()
+      ..sort((a, b) => order.indexOf(b).compareTo(order.indexOf(a)));
+    for (final k in keys.take(_train.length - max)) {
+      _train.remove(k);
+    }
+  }
+
+  /// 추천: 가중치 높은 순으로 +2씩 채웠을 때 — OVR +1 최소 선택 / 한도 전부 사용 시 최대 OVR
+  _Rec _recommend(double baseSum) {
+    final w = OvrFormula.weightsFor(_pos).take(_slots).toList();
+    final target = baseSum.floor() + 1;
+    var acc = baseSum;
+    List<String>? minPick;
+    final picks = <String>[];
+    for (final e in w) {
+      acc += _trainStep * e.value / 100;
+      picks.add(e.key);
+      if (minPick == null && acc + 1e-9 >= target) minPick = List.of(picks);
+    }
+    return _Rec(minPick, picks, (acc + 1e-9).floor(), acc);
+  }
+
+  void _applyPick(List<String> keys) {
+    setState(() {
+      _train.clear();
+      for (final k in keys) {
+        _train[k] = _trainStep;
+      }
+    });
   }
 
   @override
@@ -152,7 +182,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
     final ovr = (sum + 1e-9).floor();
     final baseOvr = (OvrFormula.weightedSum(_eff(withTrain: false), _pos) + 1e-9).floor();
     final frac = sum - ovr;
-    final recs = _recommend(sum);
+    final rec = _recommend(OvrFormula.weightedSum(_eff(withTrain: false), _pos));
     final weighted = OvrFormula.weightsFor(_pos);
     final inW = weighted.map((e) => e.key).toSet();
     final others = OvrFormula.statKeys.where((k) => !inW.contains(k) && _base!.containsKey(k)).toList();
@@ -196,7 +226,10 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
                                 isDense: true,
                                 style: TextStyle(color: muted, fontSize: 12),
                                 items: [for (var g = 1; g <= 13; g++) DropdownMenuItem(value: g, child: Text('$g강'))],
-                                onChanged: (v) => setState(() => _grade = v ?? _grade),
+                                onChanged: (v) => setState(() {
+                                  _grade = v ?? _grade;
+                                  _trimTrain();
+                                }),
                               ),
                             ),
                           ],
@@ -263,29 +296,51 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
                 children: [
                   Text('다음 OVR까지 ', style: TextStyle(fontSize: 12, color: muted)),
                   Text((1 - frac).toStringAsFixed(2), style: mono.copyWith(fontSize: 12, fontWeight: FontWeight.w700, color: good)),
-                  Text(' · 훈련 합계 ', style: TextStyle(fontSize: 12, color: muted)),
-                  Text('+$_trainTotal', style: mono.copyWith(fontSize: 12, fontWeight: FontWeight.w700)),
                   Text(' · 가중합 ${sum.toStringAsFixed(2)}', style: mono.copyWith(fontSize: 12, color: muted)),
                 ],
               ),
+              const SizedBox(height: 4),
+              Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: '집중훈련 선택 ', style: TextStyle(color: muted)),
+                  TextSpan(text: '${_train.length} / $_slots', style: mono.copyWith(fontWeight: FontWeight.w800)),
+                  TextSpan(text: '개 ($_grade강은 $_slots개, 능력치당 +$_trainStep)', style: TextStyle(color: muted)),
+                ]),
+                style: const TextStyle(fontSize: 12),
+              ),
               const SizedBox(height: 10),
-              Text('OVR +1까지 최소 (단일 능력치)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: muted)),
+              Text('추천 (가중치 높은 순, 탭하면 적용)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: muted)),
               const SizedBox(height: 4),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final r in recs)
+                  if (rec.minPick != null)
                     ActionChip(
-                      onPressed: () => setState(() => _train[r.stat] = (_train[r.stat] ?? 0) + r.pts),
+                      onPressed: () => _applyPick(rec.minPick!),
                       backgroundColor: good.withOpacity(.12),
                       side: BorderSide(color: good.withOpacity(.4)),
                       labelPadding: const EdgeInsets.symmetric(horizontal: 4),
                       label: Text.rich(TextSpan(children: [
-                        TextSpan(text: '${r.stat} '),
-                        TextSpan(text: '+${r.pts}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                        const TextSpan(text: 'OVR +1 최소 '),
+                        TextSpan(text: '${rec.minPick!.length}개', style: const TextStyle(fontWeight: FontWeight.w800)),
+                        TextSpan(text: ' · ${rec.minPick!.join(' · ')}'),
                       ]), style: TextStyle(fontSize: 12, color: good)),
-                    ),
+                    )
+                  else
+                    Text('$_slots개를 다 올려도 OVR +1은 안 됩니다 (최대 가중합 ${rec.maxSum.toStringAsFixed(2)})',
+                        style: TextStyle(fontSize: 11.5, color: muted)),
+                  ActionChip(
+                    onPressed: () => _applyPick(rec.maxPick),
+                    backgroundColor: good.withOpacity(.12),
+                    side: BorderSide(color: good.withOpacity(.4)),
+                    labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    label: Text.rich(TextSpan(children: [
+                      const TextSpan(text: '최대 OVR '),
+                      TextSpan(text: '${rec.maxOvr}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                      TextSpan(text: ' · $_slots개 전부'),
+                    ]), style: TextStyle(fontSize: 12, color: good)),
+                  ),
                 ],
               ),
             ],
@@ -368,12 +423,20 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          _Stepper(
+          _PickButton(
             accent: accent,
+            good: good,
             muted: muted,
-            canDec: tr > 0,
-            onDec: () => setState(() => _train[k] = (tr - 1).clamp(0, 999)),
-            onInc: () => setState(() => _train[k] = tr + 1),
+            on: tr > 0,
+            enabled: tr > 0 || _train.length < _slots,
+            step: _trainStep,
+            onTap: () => setState(() {
+              if (tr > 0) {
+                _train.remove(k);
+              } else if (_train.length < _slots) {
+                _train[k] = _trainStep;
+              }
+            }),
           ),
         ],
       ),
@@ -382,42 +445,46 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> {
 }
 
 class _Rec {
-  final String stat;
-  final int weight;
-  final int pts;
-  const _Rec(this.stat, this.weight, this.pts);
+  final List<String>? minPick; // OVR +1에 필요한 최소 선택 (한도 내 불가면 null)
+  final List<String> maxPick; // 한도 전부 사용 (가중치 상위)
+  final int maxOvr;
+  final double maxSum;
+  const _Rec(this.minPick, this.maxPick, this.maxOvr, this.maxSum);
 }
 
-class _Stepper extends StatelessWidget {
+class _PickButton extends StatelessWidget {
   final Color accent;
+  final Color good;
   final Color muted;
-  final bool canDec;
-  final VoidCallback onDec;
-  final VoidCallback onInc;
-  const _Stepper({required this.accent, required this.muted, required this.canDec, required this.onDec, required this.onInc});
+  final bool on;
+  final bool enabled;
+  final int step;
+  final VoidCallback onTap;
+  const _PickButton({
+    required this.accent,
+    required this.good,
+    required this.muted,
+    required this.on,
+    required this.enabled,
+    required this.step,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    Widget btn(IconData icon, VoidCallback? onTap) => InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: 32,
-            height: 28,
-            child: Icon(icon, size: 16, color: onTap == null ? muted.withOpacity(.4) : accent),
-          ),
-        );
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: muted.withOpacity(.4)),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          btn(Icons.remove, canDec ? onDec : null),
-          Container(width: 1, height: 18, color: muted.withOpacity(.3)),
-          btn(Icons.add, onInc),
-        ],
+    final fg = on ? Colors.white : (enabled ? accent : muted.withOpacity(.5));
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: on ? good : Colors.transparent,
+          border: Border.all(color: on ? good : muted.withOpacity(enabled ? .5 : .25)),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(on ? '+$step 해제' : '선택 +$step',
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: fg)),
       ),
     );
   }
