@@ -12,6 +12,7 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/trait_store.dart';
 import '../services/player_meta_store.dart';
+import '../services/ovr_formula.dart';
 import '../utils/fc_format.dart';
 import 'badges.dart';
 import 'pill_tabs.dart';
@@ -148,17 +149,100 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     return int.tryParse(vals[spPos].trim()) ?? 0;
   }
 
+  // ── 특성 팀컬러 배정 (A안, 1.0.5): _assign = { spid(str) → tc_id } ──
+  // 발동 = 후보 수 ≥ 기준 인원(서버 feature.active). 선수마다 발동 팀컬러 하나를 골라 그 효과만 받는다. 기본값 = 넥슨 배정.
+  final Map<String, int> _assign = {};
+
+  List<Map<String, dynamic>> get _activeFeatures => ((_tcCalc?['feature'] as Map?)?['active'] as List? ?? [])
+      .whereType<Map>()
+      .map((m) => Map<String, dynamic>.from(m))
+      .toList();
+  List<Map<String, dynamic>> get _inactiveFeatures => ((_tcCalc?['feature'] as Map?)?['inactive'] as List? ?? [])
+      .whereType<Map>()
+      .map((m) => Map<String, dynamic>.from(m))
+      .toList();
+
+  Map<String, dynamic>? _featureById(int? tid) {
+    if (tid == null) return null;
+    for (final f in _activeFeatures) {
+      if ((f['tc_id'] as num).toInt() == tid) return f;
+    }
+    return null;
+  }
+
+  void _resetAssignToNexon() {
+    _assign.clear();
+    for (final f in _activeFeatures) {
+      for (final sp in (f['selected'] as List? ?? [])) {
+        _assign['$sp'] = (f['tc_id'] as num).toInt();
+      }
+    }
+  }
+
+  /// 팀컬러 효과의 포지션 가중치 이득(pt): Σ 효과값 × 가중치, '전체 능력치'는 +1 OVR = 100pt
+  int _effectGain(Map<String, dynamic> f, String role) {
+    final g = OvrFormula.groups[role.toLowerCase()];
+    final w = g == null ? null : OvrFormula.weights[g];
+    var pt = 0;
+    for (final e in (f['effects'] as List? ?? [])) {
+      if (e is! Map) continue;
+      final stat = '${e['stat']}';
+      final v = (e['value'] as num? ?? 0).toInt();
+      if (stat == '전체 능력치') {
+        pt += v * 100;
+      } else if (w != null) {
+        final key = w.keys
+            .cast<String?>()
+            .firstWhere((k) => k!.replaceAll(' ', '') == stat.replaceAll(' ', ''), orElse: () => null);
+        if (key != null) pt += v * w[key]!;
+      }
+    }
+    return pt;
+  }
+
+  void _recommendByPosition() {
+    setState(() {
+      _assign.clear();
+      for (final s in _filled) {
+        final spid = '${s.player!['spid']}';
+        int? best;
+        var bestPt = 0;
+        for (final f in _activeFeatures) {
+          if (!(f['candidates'] as List? ?? []).map((c) => '$c').contains(spid)) continue;
+          final pt = _effectGain(f, s.role);
+          if (pt > bestPt) {
+            bestPt = pt;
+            best = (f['tc_id'] as num).toInt();
+          }
+        }
+        if (best != null) _assign[spid] = best;
+      }
+    });
+  }
+
+  void _assignAllTo(int tid) {
+    final f = _featureById(tid);
+    if (f == null) return;
+    setState(() {
+      for (final sp in (f['candidates'] as List? ?? [])) {
+        _assign['$sp'] = tid;
+      }
+    });
+  }
+
   // ── 팀컬러 (1.0.4, 2-A): 카드 시트 목록 · 검색/랭커픽 일치 표시·필터 ──
   /// 현재 스쿼드에서 발동 중인 팀컬러 id (SquadSetTeamColorInfo 응답 키 = tc_id)
   Set<String> _activeTcIds() {
     final out = <String>{};
     final tc = _tcCalc?['total_team_color'];
     if (tc is Map) {
-      for (final sec in ['affiliation', 'feature', 'enhance']) {
+      for (final sec in ['affiliation', 'enhance']) {
         final m = tc[sec];
         if (m is Map) out.addAll(m.keys.map((k) => '$k'));
       }
     }
+    // 특성 팀컬러는 현재 배정 기준 (누군가 선택한 것만 발동 중으로 표시)
+    out.addAll(_assign.values.map((v) => '$v'));
     return out;
   }
 
@@ -283,8 +367,28 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       final calcOvr = (_tcCalc?['ovr_by_spid'] as Map?)?['$spid'];
       return calcOvr is num ? calcOvr.toInt() : null;
     }
-    final tcBonus = (_tcCalc?['tc_bonus_by_spid'] as Map?)?['$spid'];
-    return base + (kGradeBonus[slot.grade] ?? 0) + (kAdapBonus[_adap] ?? 0) + (tcBonus is num ? tcBonus.toInt() : 0);
+    // 소속/강화 보너스 + 배정된 특성 팀컬러의 '전체 능력치' (서버 tc_base_bonus_by_spid가 없으면 구 tc_bonus_by_spid)
+    final baseMap = _tcCalc?['tc_base_bonus_by_spid'] as Map?;
+    num tcBonus;
+    if (baseMap != null) {
+      tcBonus = (baseMap['$spid'] as num?) ?? 0;
+      final f = _featureById(_assign['$spid']);
+      tcBonus += (f?['ovr_bonus'] as num?) ?? 0;
+    } else {
+      tcBonus = ((_tcCalc?['tc_bonus_by_spid'] as Map?)?['$spid'] as num?) ?? 0;
+    }
+    return base + (kGradeBonus[slot.grade] ?? 0) + (kAdapBonus[_adap] ?? 0) + tcBonus.toInt();
+  }
+
+  /// 슬롯 선수의 팀컬러 '전체 능력치' 합 (소속/강화 + 배정된 특성) — 집훈 계산기 진입용
+  int _slotTcBonus(_Slot slot) {
+    final p = slot.player;
+    if (p == null) return 0;
+    final spid = '${p['spid']}';
+    final baseMap = _tcCalc?['tc_base_bonus_by_spid'] as Map?;
+    if (baseMap == null) return ((_tcCalc?['tc_bonus_by_spid'] as Map?)?[spid] as num?)?.toInt() ?? 0;
+    final f = _featureById(_assign[spid]);
+    return ((baseMap[spid] as num?) ?? 0).toInt() + ((f?['ovr_bonus'] as num?) ?? 0).toInt();
   }
 
   /// 같은 선수의 시즌 카드들은 pid(선수 고유번호)가 동일 — spid 뒤 6자리
@@ -442,7 +546,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       final d = json.decode(r.body);
       if (!mounted || seq != _calcSeq) return; // 이후 요청이 있으면 무시
       if (d['success'] == true) {
-        setState(() => _tcCalc = Map<String, dynamic>.from(d));
+        setState(() {
+          _tcCalc = Map<String, dynamic>.from(d);
+          _resetAssignToNexon();
+        });
       }
     } catch (e) {
       print('[SquadTab] 팀컬러 계산 실패: $e');
@@ -1172,7 +1279,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           name: '${p['name'] ?? ''}',
                           grade: slot.grade,
                           // 현재 스쿼드에서 발동 중인 '전체 능력치 +N' 팀컬러를 자동 채움
-                          tcBonus: ((_tcCalc?['tc_bonus_by_spid'] as Map?)?['${p['spid']}'] as num?)?.toInt() ?? 0,
+                          tcBonus: _slotTcBonus(slot),
                           role: slot.role,
                           faceUrl: p['face_url']?.toString(),
                           season: p['season']?.toString(),
@@ -1618,6 +1725,173 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   }
 
   // ── 요약 카드 (인원/급여/구단가치 + 팀컬러 로고·발동 스킬) ──
+  // ── 특성 팀컬러 배정 섹션 (A안, 1.0.5): 팀컬러 행마다 선택(초록)/후보(점선) 칩, 누르면 옮김 ──
+  Widget _featureAssignSection() {
+    final active = _activeFeatures;
+    final inactive = _inactiveFeatures;
+    if (active.isEmpty && inactive.isEmpty) return const SizedBox.shrink();
+    final good = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    final nameOf = <String, String>{
+      for (final s in _filled) '${s.player!['spid']}': _shortName(s.player!['name']?.toString())
+    };
+    String shortTc(String n) {
+      final t = n.replaceAll(' 잉글랜드', '');
+      return t.length > 8 ? t.substring(0, 8) : t;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (active.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('특성 팀컬러 배정', style: TextStyle(fontSize: 10, color: _subColor)),
+              _toolChip('넥슨 기본', () => setState(_resetAssignToNexon)),
+              _toolChip('포지션 맞춤', _recommendByPosition, primary: true),
+              PopupMenuButton<int>(
+                tooltip: '한 팀컬러에 몰아주기',
+                onSelected: _assignAllTo,
+                itemBuilder: (_) => [
+                  for (final f in active)
+                    PopupMenuItem(
+                        value: (f['tc_id'] as num).toInt(),
+                        child: Text('${f['name']} (후보 ${(f['candidates'] as List? ?? []).length})',
+                            style: const TextStyle(fontSize: 13))),
+                ],
+                child: _toolChip('몰아주기 ▾', null),
+              ),
+            ],
+          ),
+        ],
+        for (final f in active) ...[
+          const SizedBox(height: 8),
+          Builder(builder: (_) {
+            final tid = (f['tc_id'] as num).toInt();
+            final cands = (f['candidates'] as List? ?? []).map((c) => '$c').toList();
+            final sel = cands.where((sp) => _assign[sp] == tid).toList();
+            final effects =
+                (f['effects'] as List? ?? []).whereType<Map>().map((e) => '${e['stat']} +${e['value']}').join(' · ');
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if ('${f['icon'] ?? ''}'.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Image.network('${f['icon']}',
+                        width: 22, height: 22, errorBuilder: (c, e, s) => const SizedBox(width: 22, height: 22)),
+                  )
+                else
+                  const SizedBox(width: 28),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 5,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text('${f['name']}',
+                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: _accent)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration:
+                                BoxDecoration(color: good.withOpacity(.18), borderRadius: BorderRadius.circular(999)),
+                            child: Text('발동 · 후보 ${cands.length}/${f['threshold']}',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: good)),
+                          ),
+                          Text('선택 ${sel.length}명', style: TextStyle(fontSize: 10, color: _subColor)),
+                        ],
+                      ),
+                      if (effects.isNotEmpty) Text(effects, style: TextStyle(fontSize: 11, color: _subColor)),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          for (final sp in cands)
+                            Builder(builder: (_) {
+                              final here = _assign[sp] == tid;
+                              final other = (!here && _assign[sp] != null) ? _featureById(_assign[sp]) : null;
+                              final label =
+                                  (nameOf[sp] ?? sp) + (other != null ? ' ←${shortTc('${other['name']}')}' : '');
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(999),
+                                onTap: () => setState(() {
+                                  if (here) {
+                                    _assign.remove(sp);
+                                  } else {
+                                    _assign[sp] = tid;
+                                  }
+                                }),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: here ? good.withOpacity(.14) : Colors.transparent,
+                                    border: Border.all(color: here ? good : _subColor.withOpacity(.5)),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(label,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: here ? FontWeight.w700 : FontWeight.w500,
+                                          color: here ? good : _subColor)),
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }),
+        ],
+        if (inactive.isNotEmpty)
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              dense: true,
+              title: Text('미발동 특성 팀컬러 ${inactive.length}개 (후보 부족)', style: TextStyle(fontSize: 11.5, color: _subColor)),
+              children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 4,
+                  children: [
+                    for (final f in inactive)
+                      Text('${f['name']} ${(f['candidates'] as List? ?? []).length}/${f['threshold']}',
+                          style: TextStyle(fontSize: 11, color: _subColor)),
+                  ],
+                ),
+                const SizedBox(height: 6),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _toolChip(String label, VoidCallback? onTap, {bool primary = false}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          border: Border.all(color: primary ? _accent : _subColor.withOpacity(.5)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child:
+            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: primary ? _accent : null)),
+      ),
+    );
+  }
+
   Widget _summaryCard() {
     num totalPay = 0;
     var payKnown = 0;
@@ -1636,7 +1910,6 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     if (tc != null) {
       for (final sec in const [
         ['affiliation', '소속'],
-        ['feature', '특별'],
         ['enhance', '강화'],
       ]) {
         final entries = tc[sec[0]] as Map? ?? {};
@@ -1702,12 +1975,13 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               Text('배치된 선수가 없습니다.', style: TextStyle(fontSize: 12, color: _subColor))
             else if (_tcCalc == null)
               Text('팀컬러 계산 중...', style: TextStyle(fontSize: 12, color: _subColor))
-            else if (tcEntries.isEmpty)
+            else if (tcEntries.isEmpty && _activeFeatures.isEmpty)
               Text('발동한 팀컬러가 없습니다.', style: TextStyle(fontSize: 12, color: _subColor))
             else
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _featureAssignSection(),
                   for (final e in tcEntries)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),

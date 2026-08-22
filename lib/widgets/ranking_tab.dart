@@ -21,8 +21,7 @@ class RankingTab extends StatefulWidget {
   State<RankingTab> createState() => _RankingTabState();
 }
 
-class _RankingTabState extends State<RankingTab>
-    with AutomaticKeepAliveClientMixin {
+class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMixin {
   String _mode = 'manager'; // 감독모드 기본 (사용자 지정) — 1vs1/2vs2 전환 가능
 
   // 모드별 결과 캐시 — 실패 시 이전 데이터 유지, 성공 시에만 교체 (로딩 정책 2026-08-19)
@@ -87,8 +86,7 @@ class _RankingTabState extends State<RankingTab>
           // 원하는 순위 데이터 찾기 (쉼표 제거 후 비교)
           for (var row in rows) {
             final rankElem = row.querySelector('.rank_no');
-            if (rankElem != null &&
-                rankElem.text.trim().replaceAll(',', '') == rank) {
+            if (rankElem != null && rankElem.text.trim().replaceAll(',', '') == rank) {
               final scoreElem = row.querySelector('.rank_r_win_point');
               if (scoreElem != null) {
                 final score = scoreElem.text.trim();
@@ -128,7 +126,8 @@ class _RankingTabState extends State<RankingTab>
       final parkingPage = (parkingCut + 19) ~/ 20; // 감독 10p / 1vs1 50p / 2vs2 25p
 
       final headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       };
 
       String pageUrl(int page) =>
@@ -139,8 +138,7 @@ class _RankingTabState extends State<RankingTab>
         http.get(Uri.parse(pageUrl(1)), headers: headers).timeout(Duration(seconds: 10)),
         http.get(Uri.parse(pageUrl(2)), headers: headers).timeout(Duration(seconds: 10)),
         http.get(Uri.parse(pageUrl(parkingPage)), headers: headers).timeout(Duration(seconds: 10)),
-        if (superPage > 2)
-          http.get(Uri.parse(pageUrl(superPage)), headers: headers).timeout(Duration(seconds: 10)),
+        if (superPage > 2) http.get(Uri.parse(pageUrl(superPage)), headers: headers).timeout(Duration(seconds: 10)),
       ];
       final responses = await Future.wait(futures);
 
@@ -165,7 +163,8 @@ class _RankingTabState extends State<RankingTab>
 
             // 팀컬러 이미지 URL
             final teamColorImgs = row.querySelectorAll('.team_color .ico_rank img');
-            final teamColorUrls = teamColorImgs.map((img) => img.attributes['src'] ?? '').where((src) => src.isNotEmpty).toList();
+            final teamColorUrls =
+                teamColorImgs.map((img) => img.attributes['src'] ?? '').where((src) => src.isNotEmpty).toList();
 
             // 팀컬러 이름
             final teamColorTexts = row.querySelectorAll('.team_color .name .inner');
@@ -195,8 +194,7 @@ class _RankingTabState extends State<RankingTab>
           ? parseRankings(html_parser.parse(responses[3].body))
           : (superPage == 1 ? page1Rows : page2Rows);
 
-      int? rankOf(Map<String, dynamic> r) =>
-          int.tryParse((r['rank'] as String).replaceAll(',', ''));
+      int? rankOf(Map<String, dynamic> r) => int.tryParse((r['rank'] as String).replaceAll(',', ''));
 
       // 컷 구간 추출: 컷-4 ~ 컷 (5행), 하위 리스트: 컷-10 ~ 컷 (11행)
       List<Map<String, String>> cutSlice(List<Map<String, dynamic>> rows, int cut) {
@@ -289,8 +287,18 @@ class _RankingTabState extends State<RankingTab>
         }
       }
 
+      // 상단 상세 목록: 감독모드는 TOP 40(슈챔컷 20위가 그 안에 있음), 1vs1·2vs2는 슈챔컷 부근 81~100위 (2026-08-23 사용자 지시)
+      final topRows = rtMode == 'manager'
+          ? [...page1Rows, ...page2Rows]
+          : superRows.where((r) {
+              final n = rankOf(r);
+              return n != null && n >= superCut - 19 && n <= superCut;
+            }).toList();
       final data = <String, dynamic>{
-        'top40': [...page1Rows, ...page2Rows],
+        'top40': topRows,
+        'top_title': rtMode == 'manager'
+            ? 'TOP 40'
+            : (topRows.isEmpty ? '슈챔컷 부근' : '슈챔컷 부근 (${topRows.first['rank']}-${topRows.last['rank']}위)'),
         'bottom': bottomList,
         'date_info': dateInfo,
         'cutlines': {
@@ -354,9 +362,7 @@ class _RankingTabState extends State<RankingTab>
                   child: _isLoadingCurrent
                       ? const CircularProgressIndicator()
                       : Text('데이터를 불러오지 못했습니다.\n아래로 당겨 새로고침하세요.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500)),
+                          textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                 ),
               )
             else ...[
@@ -374,20 +380,19 @@ class _RankingTabState extends State<RankingTab>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: _cutTile('슈챔컷',
-                        data['cutlines']['super_champ_cut'] as Map<String, dynamic>),
+                    child: _cutTile('슈챔컷', data['cutlines']['super_champ_cut'] as Map<String, dynamic>),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _cutTile('주차컷',
-                        data['cutlines']['parking_cut'] as Map<String, dynamic>),
+                    child: _cutTile('주차컷', data['cutlines']['parking_cut'] as Map<String, dynamic>),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
 
               // ===== TOP 40 카드 리스트 =====
-              _rankListCard('TOP 40', (data['top40'] as List).cast<Map<String, dynamic>>()),
+              _rankListCard(
+                  data['top_title'] as String? ?? 'TOP 40', (data['top40'] as List).cast<Map<String, dynamic>>()),
               const SizedBox(height: 16),
 
               // ===== 주차컷 부근 카드 리스트 =====
@@ -457,11 +462,7 @@ class _RankingTabState extends State<RankingTab>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label,
-                  style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6,
-                      color: accent)),
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.6, color: accent)),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
                 decoration: BoxDecoration(
@@ -469,10 +470,7 @@ class _RankingTabState extends State<RankingTab>
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text('${_fmtNum(cutRank)}위 컷',
-                    style: TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w800,
-                        color: bigColor)),
+                    style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: bigColor)),
               ),
             ],
           ),
@@ -480,22 +478,15 @@ class _RankingTabState extends State<RankingTab>
           Text.rich(
             TextSpan(
               text: cutScore,
-              style: TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.w900, color: bigColor),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: bigColor),
               children: [
-                TextSpan(
-                    text: ' 점',
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: subColor)),
+                TextSpan(text: ' 점', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: subColor)),
               ],
             ),
           ),
           if (prevLines.isNotEmpty) ...[
             const SizedBox(height: 3),
-            Text(prevLines.join('\n'),
-                style: TextStyle(fontSize: 9, height: 1.5, color: subColor)),
+            Text(prevLines.join('\n'), style: TextStyle(fontSize: 9, height: 1.5, color: subColor)),
           ],
           if (history.isNotEmpty) ...[
             Container(
@@ -504,17 +495,12 @@ class _RankingTabState extends State<RankingTab>
               color: dividerColor,
             ),
             Text('이전 시즌 ${_fmtNum(cutRank)}위',
-                style: TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w700,
-                    color: subColor)),
+                style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: subColor)),
             const SizedBox(height: 2),
             ...history.map((h) => Padding(
                   padding: const EdgeInsets.only(top: 1),
                   child: Text('${h['name']} · ${h['score']}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 9, color: subColor)),
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9, color: subColor)),
                 )),
           ],
         ],
@@ -533,22 +519,18 @@ class _RankingTabState extends State<RankingTab>
       decoration: BoxDecoration(
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
+        border: Border.all(color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: TextStyle(
-                  fontSize: 12.5, fontWeight: FontWeight.w800, color: titleColor)),
+          Text(title, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: titleColor)),
           const SizedBox(height: 4),
           if (rankings.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
-                child: Text('데이터가 없습니다',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                child: Text('데이터가 없습니다', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
               ),
             )
           else
@@ -568,8 +550,7 @@ class _RankingTabState extends State<RankingTab>
 
     final rankStr = (r['rank'] ?? '').toString();
     final rankNum = int.tryParse(rankStr.replaceAll(',', ''));
-    final teamColorNames =
-        (r['team_color_names'] as List?)?.cast<String>() ?? const <String>[];
+    final teamColorNames = (r['team_color_names'] as List?)?.cast<String>() ?? const <String>[];
 
     // 1~3위 금·은·동 원형 배지
     Gradient? badgeGradient;
@@ -578,23 +559,17 @@ class _RankingTabState extends State<RankingTab>
     switch (rankNum) {
       case 1:
         badgeGradient = const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFF2C14E), Color(0xFFC9922A)]);
+            begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFF2C14E), Color(0xFFC9922A)]);
         badgeTextColor = const Color(0xFF3A2A05);
         break;
       case 2:
         badgeGradient = const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFC9CDD8), Color(0xFF9AA0AE)]);
+            begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFC9CDD8), Color(0xFF9AA0AE)]);
         badgeTextColor = const Color(0xFF2A2E38);
         break;
       case 3:
         badgeGradient = const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFD89A6A), Color(0xFFA96F42)]);
+            begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFD89A6A), Color(0xFFA96F42)]);
         badgeTextColor = const Color(0xFF3A2412);
         break;
       default:
@@ -605,9 +580,7 @@ class _RankingTabState extends State<RankingTab>
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 7),
       decoration: BoxDecoration(
-        border: isLast
-            ? null
-            : Border(bottom: BorderSide(color: dividerColor)),
+        border: isLast ? null : Border(bottom: BorderSide(color: dividerColor)),
       ),
       child: Row(
         children: [
@@ -622,9 +595,7 @@ class _RankingTabState extends State<RankingTab>
             ),
             child: Text(rankStr,
                 style: TextStyle(
-                    fontSize: rankStr.length > 3 ? 8 : 10.5,
-                    fontWeight: FontWeight.w800,
-                    color: badgeTextColor)),
+                    fontSize: rankStr.length > 3 ? 8 : 10.5, fontWeight: FontWeight.w800, color: badgeTextColor)),
           ),
           const SizedBox(width: 9),
           Expanded(
@@ -634,8 +605,7 @@ class _RankingTabState extends State<RankingTab>
                 Text((r['coach'] ?? '').toString(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 12.5, fontWeight: FontWeight.w700)),
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                 if (teamColorNames.isNotEmpty)
                   Row(
                     children: [
@@ -647,10 +617,7 @@ class _RankingTabState extends State<RankingTab>
                           gradient: const LinearGradient(
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
-                              colors: [
-                                PanenkaColors.accentDeep,
-                                Color(0xFF4C1D95)
-                              ]),
+                              colors: [PanenkaColors.accentDeep, Color(0xFF4C1D95)]),
                         ),
                       ),
                       const SizedBox(width: 3),
@@ -669,13 +636,9 @@ class _RankingTabState extends State<RankingTab>
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text((r['score'] ?? '').toString(),
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w800)),
-              if ((r['value'] ?? '').toString().isNotEmpty &&
-                  (r['value'] ?? '').toString() != '-')
-                Text((r['value'] ?? '').toString(),
-                    style: TextStyle(fontSize: 9.5, color: subColor)),
+              Text((r['score'] ?? '').toString(), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+              if ((r['value'] ?? '').toString().isNotEmpty && (r['value'] ?? '').toString() != '-')
+                Text((r['value'] ?? '').toString(), style: TextStyle(fontSize: 9.5, color: subColor)),
             ],
           ),
         ],
