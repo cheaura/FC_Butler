@@ -8,7 +8,7 @@ import '../services/recent_search_store.dart';
 
 /// 홈 탭 — 벤토 위젯 보드 (허브 역할, 사용자 확정 구조).
 /// 타일을 누르면 해당 하단 탭으로 이동만 한다 (검색 타일 → 검색 탭 등).
-/// 구성: 감독 검색 / 실시간 랭킹(3모드 TOP3) / 최근 감독 / 랭커 스쿼드 / 컷라인.
+/// 구성: 감독 검색 / 시즌 D-day / 실시간 랭킹(3모드 TOP3) / 최근 감독 / 랭커 스쿼드 / 컷라인.
 class HomeTab extends StatefulWidget {
   /// 하단 탭 전환 콜백 ('search' | 'ranking' | 'squad' | 'market' | 'more')
   final void Function(String dest)? onNavigate;
@@ -31,6 +31,8 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   String? _weeklyCut;
   String? _cutDate;
   bool _cutLoading = false;
+  // 시즌 D-day (서버 season_config — 공식경기 전/후반기·감독모드, fc-info.com 대문 표기 동일)
+  Map<String, dynamic>? _seasonDday;
 
   static const _rankModes = [
     ['manager', '감독모드'],
@@ -59,6 +61,100 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     _netLoadedOnce = true;
     _loadTop3();
     _loadCutline();
+    _loadSeasonDday();
+  }
+
+  // 시즌 D-day — 마지막 값 캐시로 즉시 표시 후 서버 갱신 (컷라인과 같은 방식)
+  Future<void> _loadSeasonDday() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('home_season_dday');
+      if (cached != null && mounted && _seasonDday == null) {
+        setState(() =>
+            _seasonDday = json.decode(cached) as Map<String, dynamic>);
+      }
+    } catch (_) {}
+    try {
+      final response = await http
+          .get(Uri.parse('${ApiService.baseUrl}/api/user/lookup/season_dday'))
+          .timeout(const Duration(seconds: 15));
+      final data = json.decode(response.body);
+      if (data['success'] != true || data['dday'] == null) return;
+      final dday = data['dday'] as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() => _seasonDday = dday);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('home_season_dday', json.encode(dday));
+    } catch (e) {
+      print('[HomeTab] 시즌 D-day 로드 실패: $e');
+    }
+  }
+
+  // "공식경기 시즌4 후반기 D-18 · 9월 10일(목) 종료" 한 줄 (fc-info.com 대문 형식)
+  Widget _seasonDdayRow(IconData icon, Map<String, dynamic>? e) {
+    if (e == null) return const SizedBox.shrink();
+    final days = (e['days_remaining'] as num?)?.toInt();
+    final dText = days == null
+        ? '-'
+        : (days < 0 ? '종료' : (days == 0 ? 'D-DAY' : 'D-$days'));
+    final urgent = days != null && days >= 0 && days <= 3;
+    final endLabel = (e['end_label'] ?? e['end_date'] ?? '').toString();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          // 앱 공통 아이콘 체계(머티리얼 아웃라인) — 검색 타일 아이콘 박스의 축소형
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _accent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(icon, size: 14, color: _accent),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                    text: '${e['mode']} ',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: _accent)),
+                TextSpan(
+                    text: (e['season'] ?? '').toString(),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700)),
+              ]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // 오른쪽은 D-day 위·종료일 아래 2단 — 좁은 화면에서도 한 줄 유지 (줄바꿈 금지)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(dText,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      height: 1.1,
+                      color: urgent ? Colors.redAccent : _accent)),
+              if (endLabel.isNotEmpty)
+                Text('$endLabel 종료',
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(fontSize: 10, color: _subColor)),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   // 마지막 컷라인 값을 즉시 표시 (로딩 지연 체감 제거 — 백그라운드에서 갱신)
@@ -344,6 +440,25 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                 ),
               ),
             ),
+            if (_seasonDday != null) ...[
+              const SizedBox(height: 10),
+              // 시즌 D-day (와이드 — 공식경기 전/후반기 + 감독모드, fc-info.com 대문 표기)
+              _tileBox(
+                onTap: _loadSeasonDday,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _tileLabel('시즌 종료 D-DAY'),
+                    const SizedBox(height: 8),
+                    // 공식경기=직접 조작(게임패드) / 감독모드=전술 지시만(전술 클립보드, FM 감독)
+                    _seasonDdayRow(Icons.sports_esports_outlined,
+                        _seasonDday!['official'] as Map<String, dynamic>?),
+                    _seasonDdayRow(Icons.assignment_outlined,
+                        _seasonDday!['manager'] as Map<String, dynamic>?),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             // 실시간 랭킹 (와이드 — 3모드 TOP3, 사용자 지정)
             _tileBox(
