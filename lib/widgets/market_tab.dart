@@ -195,6 +195,31 @@ class _MarketTabState extends State<MarketTab>
     return season.isNotEmpty ? '[$season] $name' : name;
   }
 
+  // ── BP 1억:1 축소(2026-08-20 넥슨 점검) 대응 ──
+  // 넥슨은 이적시장 히스토리를 옛 단위 그대로 두므로 점검 전 거래는 옛 단위로 내려온다.
+  // 점검 시작 2026-08-20 02:30 KST = 2026-08-19 17:30 UTC (tradeDate는 UTC).
+  // 서버(utils/bp_unit.py)와 같은 규칙: 1억으로 나눠 올림, 최소 1.
+  static const String _bpUnitCutoverUtc = '2026-08-19T17:30:00';
+  static const int _bpUnitDivisor = 100000000;
+
+  static bool _isOldBpUnit(String? tradeDate) {
+    if (tradeDate == null || tradeDate.isEmpty) return false;
+    final td = tradeDate.length > 19 ? tradeDate.substring(0, 19) : tradeDate;
+    return td.compareTo(_bpUnitCutoverUtc) < 0;
+  }
+
+  /// 넥슨 거래 행의 value를 새 단위로 정규화 (옛 단위 거래만 변환, 원본 Map을 수정)
+  static List<Map<String, dynamic>> _normalizeTradeRows(List<Map<String, dynamic>> rows) {
+    for (final t in rows) {
+      if (!_isOldBpUnit(t['tradeDate']?.toString())) continue;
+      final v = (t['value'] as num?)?.toInt() ?? 0;
+      if (v <= 0) continue;
+      final converted = (v + _bpUnitDivisor - 1) ~/ _bpUnitDivisor;
+      t['value'] = converted < 1 ? 1 : converted;
+    }
+    return rows;
+  }
+
   static String formatBp(num? v) {
     if (v == null) return '-';
     final n = v.toInt();
@@ -242,9 +267,9 @@ class _MarketTabState extends State<MarketTab>
         setState(() => _error = '거래내역 조회에 실패했습니다. (응답 ${response.statusCode})');
         return;
       }
-      final rows = data
+      final rows = _normalizeTradeRows(data
           .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+          .toList());
       setState(() {
         if (reset) {
           _trades[type] = rows;
@@ -384,7 +409,8 @@ class _MarketTabState extends State<MarketTab>
     }
     final data = json.decode(utf8.decode(response.bodyBytes));
     if (response.statusCode != 200 || data is! List) return false;
-    final rows = data.map((e) => Map<String, dynamic>.from(e)).toList();
+    final rows = _normalizeTradeRows(
+        data.map((e) => Map<String, dynamic>.from(e)).toList());
     if (mounted) {
       setState(() {
         _trades['buy']!.addAll(rows);

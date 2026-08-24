@@ -142,22 +142,26 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     return 0;
   }
 
-  // "15경 1,893조" → 조 단위 숫자 (구단가치 우세 판정용, 실패 시 null)
+  // "346억 1,522만" / "15경 1,893조" → 만 단위 숫자 (구단가치 우세 판정용, 실패 시 null)
+  // 2026-08-20 BP 1억:1 축소로 랭킹 페이지 구단가치가 경/조 → 억/만 단위로 내려와
+  // 경·조·억·만 네 단위를 모두 합산한다 (단위 표기가 어느 쪽이든 동작).
   static num? _parsePrice(String? text) {
     if (text == null || text.isEmpty) return null;
+    const unitInMan = <String, num>{
+      '경': 1000000000000, // 1경 = 1조 만
+      '조': 100000000, // 1조 = 1억 만
+      '억': 10000, // 1억 = 1만 만
+      '만': 1,
+    };
     num total = 0;
     var found = false;
-    final gyeong = RegExp(r'([\d,]+)\s*경').firstMatch(text);
-    if (gyeong != null) {
-      total += (num.tryParse(gyeong.group(1)!.replaceAll(',', '')) ?? 0) *
-          10000; // 1경 = 1만 조
-      found = true;
-    }
-    final jo = RegExp(r'([\d,]+)\s*조').firstMatch(text);
-    if (jo != null) {
-      total += num.tryParse(jo.group(1)!.replaceAll(',', '')) ?? 0;
-      found = true;
-    }
+    unitInMan.forEach((unit, mul) {
+      final m = RegExp(r'([\d,]+)\s*' + unit).firstMatch(text);
+      if (m != null) {
+        total += (num.tryParse(m.group(1)!.replaceAll(',', '')) ?? 0) * mul;
+        found = true;
+      }
+    });
     return found ? total : null;
   }
 

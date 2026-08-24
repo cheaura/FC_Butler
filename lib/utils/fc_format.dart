@@ -12,7 +12,12 @@ String formatBp(num? v) {
     final eok = (n % 1000000000000) ~/ 100000000;
     return eok > 0 ? '$jo조 ${eok}억' : '$jo조';
   }
-  if (n >= 100000000) return '${n ~/ 100000000}억';
+  // 2026-08-20 BP 1억:1 축소 이후 시세가 수천만~수억 단위라 억 아래 만 단위까지 표기
+  if (n >= 100000000) {
+    final eok = n ~/ 100000000;
+    final man = (n % 100000000) ~/ 10000;
+    return man > 0 ? '$eok억 ${man}만' : '$eok억';
+  }
   if (n >= 10000) return '${n ~/ 10000}만';
   return '$n';
 }
