@@ -34,7 +34,6 @@ class _MarketTabState extends State<MarketTab>
 
   String? _apiKey;
   String? _nickname;
-  String? _ouid;
   bool _saving = false;
   String? _error;
 
@@ -82,9 +81,8 @@ class _MarketTabState extends State<MarketTab>
 
   Future<void> _saveSettings() async {
     final key = _keyController.text.trim();
-    final name = _nameController.text.trim();
-    if (key.isEmpty || name.isEmpty) {
-      setState(() => _error = 'API 키와 본인 감독명을 모두 입력해주세요.');
+    if (key.isEmpty) {
+      setState(() => _error = 'API 키를 입력해주세요.');
       return;
     }
     setState(() {
@@ -92,27 +90,26 @@ class _MarketTabState extends State<MarketTab>
       _error = null;
     });
     try {
-      // 키·감독명 검증: ouid 조회가 성공해야 저장
+      // 키 검증: 거래 API 1건 조회가 성공해야 저장
+      // (거래 API는 키 소유자 데이터만 반환 — ouid·감독명 불필요, 2026-09 실측)
       final response = await http.get(
-        Uri.parse('$_apiBase/fconline/v1/id'
-            '?nickname=${Uri.encodeComponent(name)}'),
+        Uri.parse('$_apiBase/fconline/v1/user/trade'
+            '?tradetype=buy&offset=0&limit=1'),
         headers: {'x-nxopen-api-key': key},
       ).timeout(const Duration(seconds: 15));
-      final data = json.decode(response.body);
-      if (response.statusCode != 200 || data['ouid'] == null) {
-        setState(() => _error = response.statusCode == 400
-            ? '감독명을 찾을 수 없습니다. 본인 감독명을 확인해주세요.'
-            : 'API 키가 올바르지 않습니다. (응답 ${response.statusCode})');
+      if (response.statusCode == 429) {
+        setState(() =>
+            _error = '오늘 API 호출 한도를 모두 사용했습니다. 자정(00:00) 이후 다시 시도해주세요.');
+        return;
+      }
+      if (response.statusCode != 200) {
+        setState(() =>
+            _error = 'API 키가 올바르지 않습니다. (응답 ${response.statusCode})');
         return;
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_keyPref, key);
-      await prefs.setString(_namePref, name);
-      setState(() {
-        _apiKey = key;
-        _nickname = name;
-        _ouid = data['ouid'];
-      });
+      setState(() => _apiKey = key);
       _loadTrades(reset: true);
     } catch (e) {
       setState(() => _error = '네트워크 오류가 발생했습니다.');
@@ -128,7 +125,6 @@ class _MarketTabState extends State<MarketTab>
     setState(() {
       _apiKey = null;
       _nickname = null;
-      _ouid = null;
       _trades['buy'] = [];
       _trades['sell'] = [];
       _offsets['buy'] = 0;
@@ -137,22 +133,50 @@ class _MarketTabState extends State<MarketTab>
     });
   }
 
-  Future<String?> _resolveOuid() async {
-    if (_ouid != null) return _ouid;
+  /// 스쿼드 손익용 감독명 저장 — 존재 검증(/id) 후 저장하고 바로 손익 조회
+  Future<void> _saveNickname() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = '본인 감독명을 입력해주세요.');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
       final response = await http.get(
         Uri.parse('$_apiBase/fconline/v1/id'
-            '?nickname=${Uri.encodeComponent(_nickname ?? '')}'),
+            '?nickname=${Uri.encodeComponent(name)}'),
         headers: {'x-nxopen-api-key': _apiKey ?? ''},
       ).timeout(const Duration(seconds: 15));
       final data = json.decode(response.body);
-      if (response.statusCode == 200 && data['ouid'] != null) {
-        _ouid = data['ouid'];
+      if (response.statusCode != 200 || data['ouid'] == null) {
+        setState(() => _error = response.statusCode == 400
+            ? '감독명을 찾을 수 없습니다. 본인 감독명을 확인해주세요.'
+            : '감독명 확인에 실패했습니다. (응답 ${response.statusCode})');
+        return;
       }
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_namePref, name);
+      setState(() => _nickname = name);
+      _loadPnl();
     } catch (e) {
-      print('[MarketTab] ouid 조회 실패: $e');
+      setState(() => _error = '네트워크 오류가 발생했습니다.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
-    return _ouid;
+  }
+
+  /// 감독명 변경 — 저장값을 지우고 입력 화면으로 (API 키는 유지)
+  Future<void> _clearNickname() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_namePref);
+    setState(() {
+      _nameController.text = _nickname ?? '';
+      _nickname = null;
+      _pnl = [];
+    });
   }
 
   Future<void> _ensureMeta() async {
@@ -245,16 +269,12 @@ class _MarketTabState extends State<MarketTab>
     });
     try {
       await _ensureMeta();
-      final ouid = await _resolveOuid();
-      if (ouid == null) {
-        setState(() => _error = '계정 확인에 실패했습니다. 키/감독명을 다시 등록해주세요.');
-        return;
-      }
+      // 거래 API는 키 소유자 데이터만 반환 — ouid 불필요 (2026-09 실측)
       final type = _tradeType;
       final offset = reset ? 0 : _offsets[type]!;
       final response = await http.get(
         Uri.parse('$_apiBase/fconline/v1/user/trade'
-            '?ouid=$ouid&tradetype=$type&offset=$offset&limit=100'),
+            '?tradetype=$type&offset=$offset&limit=100'),
         headers: {'x-nxopen-api-key': _apiKey!},
       ).timeout(const Duration(seconds: 20));
       if (response.statusCode == 429) {
@@ -392,12 +412,10 @@ class _MarketTabState extends State<MarketTab>
 
   /// 구매 내역 1페이지(100건) 추가 확보 — 심층 탐색 전용 (거래내역 세그 상태를 건드리지 않음)
   Future<bool> _fetchBuyPage() async {
-    final ouid = await _resolveOuid();
-    if (ouid == null) return false;
     final offset = _offsets['buy']!;
     final response = await http.get(
       Uri.parse('$_apiBase/fconline/v1/user/trade'
-          '?ouid=$ouid&tradetype=buy&offset=$offset&limit=100'),
+          '?tradetype=buy&offset=$offset&limit=100'),
       headers: {'x-nxopen-api-key': _apiKey!},
     ).timeout(const Duration(seconds: 20));
     if (response.statusCode == 429) {
@@ -528,15 +546,6 @@ class _MarketTabState extends State<MarketTab>
               isDense: true,
             ),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: '본인 감독명',
-              hintText: '게임 내 감독명 (스쿼드 손익 조회에 사용)',
-              isDense: true,
-            ),
-          ),
           const SizedBox(height: 8),
           if (_error != null)
             Text(_error!,
@@ -613,7 +622,7 @@ class _MarketTabState extends State<MarketTab>
               const Spacer(),
               Icon(Icons.key, size: 14, color: _accent),
               const SizedBox(width: 4),
-              Text(_nickname ?? '',
+              Text('API 키 등록됨',
                   style: TextStyle(fontSize: 12, color: _subColor)),
               TextButton(
                 onPressed: _clearSettings,
@@ -752,6 +761,37 @@ class _MarketTabState extends State<MarketTab>
   }
 
   List<Widget> _buildPnl() {
+    // 감독명 미설정 → 입력 화면 (감독명은 스쿼드 손익에만 필요 — 거래내역은 키만으로 조회)
+    if ((_nickname ?? '').isEmpty) {
+      return [
+        Text('스쿼드 손익은 게임 내 감독명으로 최근 경기 스쿼드를 조회합니다.',
+            style: TextStyle(fontSize: 12, color: _subColor)),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            labelText: '본인 감독명',
+            hintText: '게임 내 감독명',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: ElevatedButton(
+            onPressed: _saving ? null : _saveNickname,
+            child: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('조회',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ];
+    }
     num totalBuy = 0, totalPrice = 0;
     var counted = 0;
     for (final p in _pnl) {
@@ -770,6 +810,11 @@ class _MarketTabState extends State<MarketTab>
                 '${_nickname ?? ''}의 최근 경기 스쿼드 기준'
                 '${_pnlFormation.isNotEmpty ? ' · $_pnlFormation' : ''}',
                 style: TextStyle(fontSize: 12, color: _subColor)),
+          ),
+          TextButton(
+            onPressed: _pnlLoading ? null : _clearNickname,
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            child: const Text('변경', style: TextStyle(fontSize: 12)),
           ),
           TextButton(
             onPressed: _pnlLoading ? null : _loadPnl,

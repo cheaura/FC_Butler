@@ -12,17 +12,18 @@ import '../widgets/squad_tab.dart';
 import 'dashboard_screen.dart';
 
 /// 앱 탭 셸 (사용자 확정 구조):
-/// - 게스트·일반 회원: 홈 / 검색 / 랭킹 / 스쿼드 / 이적시장 / 더보기 (6탭)
-/// - 매크로 연동 계정: + 매크로 탭 (7탭, 로그인 직후 매크로 탭에서 시작)
-/// 홈은 허브 — 타일을 누르면 해당 탭으로 이동. 매크로 탭은 기존 DashboardScreen을
+/// - 게스트·일반 회원: 홈 / 검색 / 랭킹 / 스쿼드 / 집훈 / 이적시장 / 더보기 (7탭)
+/// - 매크로 연동 계정: + 모니터 탭 (8탭, 로그인 직후 모니터 탭에서 시작)
+/// 홈은 허브 — 타일을 누르면 해당 탭으로 이동. 모니터 탭(구 '매크로', 2026-09-03
+/// 스크린샷 유출 대비 명칭·아이콘 중립화 + 맨 우측 이동)은 기존 DashboardScreen을
 /// 그대로 임베드 — 기능·표현 전부 유지, 색만 테마 적용.
 class PublicHomeScreen extends StatefulWidget {
-  /// 시작 탭 인덱스 (매크로 계정 자동로그인 시 매크로 탭 = 5)
+  /// 시작 탭 인덱스 (매크로 계정 자동로그인 시 모니터 탭)
   final int? initialIndex;
   const PublicHomeScreen({Key? key, this.initialIndex}) : super(key: key);
 
-  /// 매크로 탭 인덱스 (main.dart·login_screen 라우팅에서 사용)
-  static const int macroTabIndex = 6; // 1.0.4: 집훈 탭 추가로 +1
+  /// 모니터(매크로) 탭 인덱스 (main.dart·login_screen 라우팅에서 사용)
+  static const int macroTabIndex = 7; // 2026-09-03: 맨 우측(더보기 뒤)으로 이동
 
   @override
   _PublicHomeScreenState createState() => _PublicHomeScreenState();
@@ -69,7 +70,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
         _selectTab(5);
         break;
       case 'more':
-        _selectTab(_maxIndex);
+        _selectTab(6); // 더보기 고정 인덱스 (모니터 탭이 맨 우측이라 _maxIndex 아님)
         break;
     }
   }
@@ -102,12 +103,13 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       const SquadTab(),
       const TrainingCalcScreen(asTab: true), // 1.0.4 집훈 계산기 (공개 탭)
       const MarketTab(),
+      MoreTab(onAccountChanged: _onAccountChanged),
+      // 모니터(매크로) 탭 — 맨 우측 (2026-09-03: 스크린샷 유출 대비 명칭·아이콘 중립화)
       if (isMacro)
         DashboardScreen(
           username: _apiService.username ?? '',
           apiService: _apiService,
         ),
-      MoreTab(onAccountChanged: _onAccountChanged),
     ];
     final items = <PillBarItem>[
       const PillBarItem(Icons.grid_view_rounded, '홈'),
@@ -116,8 +118,8 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       const PillBarItem(Icons.groups, '스쿼드'),
       const PillBarItem(Icons.fitness_center, '집훈'),
       const PillBarItem(Icons.storefront, '이적시장'),
-      if (isMacro) const PillBarItem(Icons.precision_manufacturing, '매크로'),
       const PillBarItem(Icons.more_horiz, '더보기'),
+      if (isMacro) const PillBarItem(Icons.query_stats, '모니터'),
     ];
     final index = _tabIndex.clamp(0, children.length - 1);
 
