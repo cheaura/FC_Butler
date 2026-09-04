@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../providers/theme_provider.dart';
 import '../constants/legal_texts.dart';
 import '../services/api_service.dart';
 import 'public_home_screen.dart';
@@ -113,11 +114,12 @@ class _SignupScreenState extends State<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        // 브랜드 그라데이션: 프리셋 띠색 → 바탕색 (2026-09-04 색상 프리셋)
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF2A1B54), Color(0xFF100F1A)],
+            colors: [PanenkaTokens.of(context).band, PanenkaTokens.of(context).bg],
           ),
         ),
         child: SafeArea(
@@ -245,12 +247,12 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       child: _isLoading
                           ? const CircularProgressIndicator()
-                          : const Text(
+                          : Text(
                               '가입하기',
                               style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF7C3AED)),
+                                  color: PanenkaTokens.of(context).accentInk),
                             ),
                     ),
                   ),

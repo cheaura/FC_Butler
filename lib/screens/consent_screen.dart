@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../providers/theme_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/legal_texts.dart';
 import '../widgets/panenka_logo.dart';
@@ -85,11 +86,12 @@ class _ConsentScreenState extends State<ConsentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(
+        // 브랜드 그라데이션: 프리셋 띠색 → 바탕색 (2026-09-04 색상 프리셋)
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF2A1B54), Color(0xFF100F1A)],
+            colors: [PanenkaTokens.of(context).band, PanenkaTokens.of(context).bg],
           ),
         ),
         child: SafeArea(
@@ -130,12 +132,12 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     ),
                     child: _isSaving
                         ? const CircularProgressIndicator()
-                        : const Text(
+                        : Text(
                             '모두 동의하고 시작하기',
                             style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF7C3AED)),
+                                color: PanenkaTokens.of(context).accentInk),
                           ),
                   ),
                 ),

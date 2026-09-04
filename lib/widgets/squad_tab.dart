@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../providers/theme_provider.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -77,8 +78,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   Color get _accent => Theme.of(context).colorScheme.primary;
   Color get _subColor => Colors.grey.shade500;
-  Color get _rose =>
-      Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE58AA8) : const Color(0xFFD1567F);
+  Color get _rose => PanenkaTokens.of(context).loseInk; // 색상 프리셋 패배색
 
   @override
   void initState() {
@@ -319,7 +319,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         case 'club':
           return const Color(0xFFF59E0B);
         default:
-          return const Color(0xFFA78BFA);
+          return PanenkaTokens.of(context).accentInk; // 색상 프리셋 강조색
       }
     }
 
@@ -381,6 +381,42 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   }
 
   /// 슬롯 선수의 팀컬러 '전체 능력치' 합 (소속/강화 + 배정된 특성) — 집훈 계산기 진입용
+  /// 집훈 계산기 3칸 자동 채움: 넥슨 발동 결과(소속/강화 playerlist)와 특성 배정으로 {section: [tc_id, level]}
+  Map<String, List<int>> _slotTcPreset(_Slot slot) {
+    final out = <String, List<int>>{};
+    final p = slot.player;
+    if (p == null) return out;
+    final spid = (p['spid'] as num?)?.toInt() ?? 0;
+    final tc = _tcCalc?['total_team_color'];
+    if (tc is Map) {
+      for (final sec in const ['affiliation', 'enhance']) {
+        final m = tc[sec];
+        if (m is! Map) continue;
+        for (final e in m.entries) {
+          final v = e.value;
+          if (v is! Map) continue;
+          var pl = v['playerlist'];
+          if (pl is String) {
+            try {
+              pl = json.decode(pl);
+            } catch (_) {
+              pl = null;
+            }
+          }
+          final ids = (pl as List? ?? const []).map((x) => int.tryParse('$x') ?? 0);
+          if (!ids.contains(spid)) continue;
+          final tid = int.tryParse('${e.key}') ?? 0;
+          final lv = (v['lv'] as num?)?.toInt() ?? int.tryParse('${v['lv'] ?? ''}') ?? 1;
+          if (tid > 0) out[sec] = [tid, lv];
+          break;
+        }
+      }
+    }
+    final feat = int.tryParse('${_assign['$spid'] ?? ''}') ?? 0;
+    if (feat > 0) out['feature'] = [feat, 1];
+    return out;
+  }
+
   int _slotTcBonus(_Slot slot) {
     final p = slot.player;
     if (p == null) return 0;
@@ -1284,8 +1320,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                           spid: (p['spid'] as num).toInt(),
                           name: '${p['name'] ?? ''}',
                           grade: slot.grade,
-                          // 현재 스쿼드에서 발동 중인 '전체 능력치 +N' 팀컬러를 자동 채움
+                          // 현재 스쿼드에서 발동 중인 팀컬러를 3칸(강화/소속/특성)에 자동 채움 + 구 합계(폴백)
                           tcBonus: _slotTcBonus(slot),
+                          tcPreset: _slotTcPreset(slot),
                           role: slot.role,
                           faceUrl: p['face_url']?.toString(),
                           season: p['season']?.toString(),

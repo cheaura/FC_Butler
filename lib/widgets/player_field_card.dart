@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../providers/theme_provider.dart';
 import '../constants/positions.dart';
 import '../services/trait_store.dart';
 import '../services/player_meta_store.dart';
@@ -268,13 +269,16 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFA78BFA),
+                          color: PanenkaTokens.of(context).accentBand,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(color: Colors.black54, width: 0.8),
                         ),
                         child: Text('$tcCount',
-                            style: const TextStyle(
-                                fontSize: 7, fontWeight: FontWeight.w800, color: Color(0xFF15102A), height: 1.2)),
+                            style: TextStyle(
+                                fontSize: 7,
+                                fontWeight: FontWeight.w800,
+                                color: panenkaOnFill(PanenkaTokens.of(context).accentBand),
+                                height: 1.2)),
                       ),
                     ),
                   ),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../providers/theme_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../screens/training_calc_screen.dart';
@@ -267,12 +268,11 @@ class _SearchTabState extends State<SearchTab>
   Color get _subColor => Colors.grey.shade500;
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
-  // 승무패 색 (상태탭 A안 규칙: 승=퍼플·무=퍼플그레이·패=로즈, 라이트는 명도 파생)
-  Color get _winColor => _accent;
+  // 승무패 색 (색상 프리셋 2026-09-04: 승=승리색·무=중립 회색·패=패배색, 라이트는 대비 보정)
+  Color get _winColor => PanenkaTokens.of(context).winInk;
   Color get _drawColor =>
       _isDark ? const Color(0xFF8B87A0) : const Color(0xFF6E6884);
-  Color get _loseColor =>
-      _isDark ? const Color(0xFFE58AA8) : const Color(0xFFD1567F);
+  Color get _loseColor => PanenkaTokens.of(context).loseInk;
 
   Widget _tierLogo(String? url, {double size = 44}) {
     if (url == null || url.isEmpty) {

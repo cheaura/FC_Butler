@@ -16,21 +16,19 @@ import 'market_tab.dart';
 import 'analysis_tab.dart';
 import '../widgets/ranking_tab.dart';
 
-// ── 상태탭 A안 팔레트 (2026-08-19 색 조화: 기능·표현 전부 유지, 색만 변경) ──
-// 승·인게임 배너·일시정지 = 퍼플 토널 / 패·중지 = 로즈 / 무 = 퍼플그레이
-// 온라인 = 민트 점 + 중립 알약 / 주계정 = 퍼플 토널 테두리 알약 / 시작 = 퍼플 솔리드
-Color _wdlWin(BuildContext context) => Theme.of(context).colorScheme.primary;
+// ── 상태탭 팔레트 (2026-09-04 색상 프리셋: 기능·표현 전부 유지, 색만 역할 색으로 연결) ──
+// 승·일시정지 = 승리색 / 패·중지 = 패배색(테라코타) / 무 = 중립 회색
+// 경기 중 배너·상대 점수 = 강조색 / 온라인 = 민트 점(고정) / 주계정 = 보조색 테두리 알약
+// 시작·긍정 스낵바 = 강조색 채움
+Color _wdlWin(BuildContext context) => PanenkaTokens.of(context).winInk;
 Color _wdlDraw(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF8B87A0)
         : const Color(0xFF6E6884);
-Color _wdlLose(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFFE58AA8)
-        : const Color(0xFFD1567F);
-const Color _mintDot = Color(0xFF6EE7B7); // 온라인 표시 점
-const Color _roseSolid = Color(0xFFD1567F); // 중지·취소 계열 솔리드
-const Color _purpleSolid = Color(0xFF7C3AED); // 시작·긍정 계열 솔리드
+Color _wdlLose(BuildContext context) => PanenkaTokens.of(context).loseInk;
+const Color _mintDot = Color(0xFF6EE7B7); // 온라인 표시 점 (프리셋 무관 고정)
+Color _stopSolid(BuildContext context) => PanenkaTokens.of(context).lose; // 중지·취소 계열 채움
+Color _ctaSolid(BuildContext context) => PanenkaTokens.of(context).accentInk; // 시작·긍정 계열 채움
 
 class DashboardScreen extends StatefulWidget {
   final String username;
@@ -450,7 +448,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
     if (result['success']) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: _purpleSolid),
+        SnackBar(content: Text('$username: 매크로 시작 명령 전송됨'), backgroundColor: _ctaSolid(context)),
       );
       await _loadStatus();
     } else {
@@ -463,9 +461,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   // 원격 제어 공통 헬퍼 (2026-07-18 원격 제어 확장) — 명령 전송 + 결과 스낵바 + 상태 갱신
   Future<void> _sendControl(String username,
       Future<Map<String, dynamic>> request, String okMsg,
-      {Color color = _purpleSolid}) async {
+      {Color? color}) async {
     final result = await request;
     if (!mounted) return;
+    color ??= _ctaSolid(context);
     if (result['success'] == true) {
       final msg = (result['message'] is String && (result['message'] as String).isNotEmpty)
           ? result['message'] as String
@@ -485,7 +484,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final result = await widget.apiService.stopMacro(username);
     if (result['success']) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$username: 매크로 중지 명령 전송됨'), backgroundColor: _roseSolid),
+        SnackBar(content: Text('$username: 매크로 중지 명령 전송됨'), backgroundColor: _stopSolid(context)),
       );
       await _loadStatus();
     } else {
@@ -501,7 +500,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       appBar: AppBar(
         // 우측 요소(시즌 D-day 등)에 밀려 텍스트가 잘리던 문제 — 아이콘만 표시 (2026-08-16)
         title: const PanenkaLogo(size: 28),
-        backgroundColor: const Color(0xFF2A1B54), // 퍼플 브랜드 (2026-08-17 개편)
+        backgroundColor: PanenkaTokens.of(context).band, // 프리셋 띠색 (2026-09-04)
+        foregroundColor: PanenkaTokens.of(context).bandInk, // 띠 위 아이콘은 라이트에서도 밝은색 (대비 보장)
         actions: [
           if (_seasonDaysRemaining != null)
             Padding(
@@ -680,7 +680,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               children: [
                 Row(
                   children: [
-                    Icon(Icons.person, color: const Color(0xFF7C3AED), size: 20),
+                    Icon(Icons.person, color: PanenkaTokens.of(context).subInk, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       username,
@@ -688,19 +688,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ),
                     if (isPrimary) ...[
                       const SizedBox(width: 8),
-                      // 주계정 뱃지: 퍼플 토널 + 테두리 알약 (A안)
+                      // 주계정 뱃지: 보조색 토널 + 테두리 알약 (색상 프리셋)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: _wdlWin(context).withOpacity(0.14),
+                          color: PanenkaTokens.of(context).subInk.withOpacity(0.14),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                              color: _wdlWin(context).withOpacity(0.55)),
+                              color: PanenkaTokens.of(context).subInk.withOpacity(0.55)),
                         ),
                         child: Text(
                           '주 계정',
                           style: TextStyle(
-                              color: _wdlWin(context),
+                              color: PanenkaTokens.of(context).subInk,
                               fontSize: 10,
                               fontWeight: FontWeight.w700),
                         ),
@@ -754,13 +754,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 ),
                 child: Row(
                   children: [
-                    // 상대 정보 강조: 로즈 (A안 파생 — 주황 제거)
+                    // 상대 정보 강조: 프리셋 강조색 (2026-09-04)
                     Text(
                       'vs',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: _wdlLose(context),
+                        color: PanenkaTokens.of(context).accentInk,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -785,7 +785,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: _wdlLose(context),
+                        color: PanenkaTokens.of(context).accentInk,
                       ),
                     ),
                   ],
@@ -793,13 +793,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ),
             ],
             if (ingameTime != null) ...[
-              // 인게임 배너 색 (A안): 경기중=퍼플 토널, 승부차기=민트 토널,
-              // 매칭대기=퍼플그레이 토널 — 같은 규칙 파생
+              // 인게임 배너 색 (색상 프리셋): 경기중=강조색+경기 중 띠 배경,
+              // 승부차기=민트 토널(고정), 매칭대기=중립 회색 토널
               Builder(builder: (context) {
                 final isDark =
                     Theme.of(context).brightness == Brightness.dark;
+                final tokens = PanenkaTokens.of(context);
                 final bannerColor = isPlaying
-                    ? _wdlWin(context)
+                    ? tokens.accentInk
                     : isPenaltyKick
                         ? (isDark
                             ? _mintDot
@@ -810,7 +811,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: bannerColor.withOpacity(0.12),
+                    color: isPlaying
+                        ? tokens.liveBg
+                        : bannerColor.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(8),
                     border: Border(
                       left: BorderSide(color: bannerColor, width: 4),
@@ -924,7 +927,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle}) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: const Color(0xFF7C3AED)),
+        Icon(icon, size: 16, color: PanenkaTokens.of(context).subInk),
         const SizedBox(width: 4),
         Expanded(
           child: Column(
@@ -1064,9 +1067,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ElevatedButton(
                 onPressed: () {
                   if (gamesValue == null || gamesValue! < 1 || gamesValue! > 999) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('경기 수는 1~999 사이로 입력하세요.'),
-                        backgroundColor: _roseSolid));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: const Text('경기 수는 1~999 사이로 입력하세요.'),
+                        backgroundColor: _stopSolid(context)));
                     return;
                   }
                   _sendControl(username,
@@ -1099,9 +1102,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               ElevatedButton(
                 onPressed: () {
                   if (pickedTime == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('정지 시각을 먼저 선택하세요.'),
-                        backgroundColor: _roseSolid));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: const Text('정지 시각을 먼저 선택하세요.'),
+                        backgroundColor: _stopSolid(context)));
                     return;
                   }
                   _sendControl(username,
@@ -1118,7 +1121,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   TextButton(
                       onPressed: () => _sendControl(username,
                           widget.apiService.cancelReserveStop(username),
-                          '경기 수 예약 취소 전송됨', color: _roseSolid),
+                          '경기 수 예약 취소 전송됨', color: _stopSolid(context)),
                       child: Text('경기 수 예약 취소',
                           style: TextStyle(
                               fontSize: 12, color: _wdlLose(context)))),
@@ -1126,7 +1129,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   TextButton(
                       onPressed: () => _sendControl(username,
                           widget.apiService.cancelReserveStopTime(username),
-                          '시간 예약 취소 전송됨', color: _roseSolid),
+                          '시간 예약 취소 전송됨', color: _stopSolid(context)),
                       child: Text('시간 예약 취소',
                           style: TextStyle(
                               fontSize: 12, color: _wdlLose(context)))),
@@ -1262,7 +1265,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$username: 설정 변경 $total건 전송됨'),
-            backgroundColor: _purpleSolid),
+            backgroundColor: _ctaSolid(context)),
       );
       await _loadStatus();
     } else {
@@ -1434,9 +1437,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           
                           if (parkingConditions.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('주차모드 조건을 최소 1개 이상 선택해주세요.'),
-                                backgroundColor: _roseSolid,
+                              SnackBar(
+                                content: const Text('주차모드 조건을 최소 1개 이상 선택해주세요.'),
+                                backgroundColor: _stopSolid(context),
                               ),
                             );
                             return;
@@ -1450,8 +1453,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('시작'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF7C3AED),
-                        foregroundColor: Colors.white,
+                        backgroundColor: PanenkaTokens.of(context).accentInk,
+                        foregroundColor: PanenkaTokens.of(context).onAccentInk,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                     ),
@@ -1511,12 +1514,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   decoration: BoxDecoration(
                     color: Theme.of(context).brightness == Brightness.dark
                         ? Colors.grey[850]
-                        : const Color(0xFFEDE9FE),
+                        : PanenkaTokens.of(context).accentSoft,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: Theme.of(context).brightness == Brightness.dark
                           ? Colors.grey[700]!
-                          : const Color(0xFFC4B5FD),
+                          : PanenkaTokens.of(context).accentInk.withOpacity(0.45),
                     ),
                   ),
                   child: Column(
@@ -3665,13 +3668,14 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
                         physics: const BouncingScrollPhysics(),
                         itemBuilder: (context, index) {
                           final r = widget.results[index];
-                          // 인게임 스타일 사각 타일 — A안 색 (승 퍼플 / 무 퍼플그레이 / 패 로즈)
+                          // 인게임 스타일 사각 타일 — 색상 프리셋 (승 승리색 / 무 중립 회색 / 패 패배색)
+                          final tokens = PanenkaTokens.of(context);
                           final bg = r == 'WIN'
-                              ? Theme.of(context).colorScheme.primary
+                              ? tokens.win
                               : r == 'DRAW'
                                   ? const Color(0xFF8B87A0)
-                                  : _roseSolid;
-                          const fg = Colors.white;
+                                  : tokens.lose;
+                          final fg = r == 'WIN' ? tokens.onWin : Colors.white;
                           final ch = r == 'WIN' ? '승' : r == 'DRAW' ? '무' : '패';
                           return Center(
                             child: Container(
@@ -3718,13 +3722,13 @@ class _RecentGamesDotsState extends State<_RecentGamesDots> {
               style: TextStyle(fontSize: 11, color: Colors.grey[500]),
             ),
             const SizedBox(width: 8),
-            // A안 색 (승 퍼플 / 무 퍼플그레이 / 패 로즈)
-            _badge('승 $wins', Theme.of(context).colorScheme.primary,
-                Colors.white),
+            // 색상 프리셋 (승 승리색 / 무 중립 회색 / 패 패배색)
+            _badge('승 $wins', PanenkaTokens.of(context).win,
+                PanenkaTokens.of(context).onWin),
             const SizedBox(width: 4),
             _badge('무 $draws', const Color(0xFF8B87A0), Colors.white),
             const SizedBox(width: 4),
-            _badge('패 $losses', _roseSolid, Colors.white),
+            _badge('패 $losses', PanenkaTokens.of(context).lose, Colors.white),
           ],
         ),
       ],

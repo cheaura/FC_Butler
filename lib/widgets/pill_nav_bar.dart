@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../providers/theme_provider.dart';
 
 class PillBarItem {
   final IconData icon;
@@ -26,10 +27,11 @@ class PanenkaPillBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = theme.colorScheme.primary;
-    final barColor = isDark
-        ? const Color(0xFF1A1626).withOpacity(0.92)
-        : Colors.white.withOpacity(0.94);
+    // 색상 프리셋(2026-09-04): 알약 바는 띠색(30), 선택 탭은 띠 위 강조색(10)
+    final tokens = PanenkaTokens.of(context);
+    final accent = tokens.accentBand;
+    final idle = tokens.bandInk.withOpacity(0.62);
+    final barColor = tokens.band.withOpacity(0.94);
     return Container(
       height: height,
       padding: const EdgeInsets.all(6),
@@ -59,7 +61,7 @@ class PanenkaPillBar extends StatelessWidget {
                 width: slotW,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: accent.withOpacity(isDark ? 0.20 : 0.14),
+                    color: tokens.accentSoftBand,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -78,7 +80,7 @@ class PanenkaPillBar extends StatelessWidget {
                                 size: height >= 56 ? 20 : 17,
                                 color: i == selectedIndex
                                     ? accent
-                                    : Colors.grey.shade500),
+                                    : idle),
                             const SizedBox(height: 2),
                             Text(items[i].label,
                                 maxLines: 1,
@@ -90,7 +92,7 @@ class PanenkaPillBar extends StatelessWidget {
                                         : FontWeight.w600,
                                     color: i == selectedIndex
                                         ? accent
-                                        : Colors.grey.shade500)),
+                                        : idle)),
                           ],
                         ),
                       ),

@@ -5,6 +5,7 @@ import '../providers/theme_provider.dart';
 import '../screens/login_screen.dart';
 import '../screens/signup_screen.dart';
 import '../screens/feedback_screen.dart';
+import '../screens/color_settings_screen.dart';
 import '../services/error_reporter.dart';
 import '../services/api_service.dart';
 
@@ -233,6 +234,26 @@ class _MoreTabState extends State<MoreTab> {
             trailing: Switch(
               value: themeProvider.isDarkMode,
               onChanged: (_) => themeProvider.toggleTheme(),
+            ),
+          ),
+          // 색상 프리셋 (2026-09-04): 카드 선택만으로 앱 전체 색 변경
+          _menuRow(
+            icon: Icons.palette_outlined,
+            title: '색상',
+            value: themeProvider.preset.name,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(themeProvider.preset.name,
+                    style: TextStyle(fontSize: 13, color: _subColor)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right, size: 18, color: _subColor),
+              ],
+            ),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => const ColorSettingsScreen()),
             ),
           ),
           _menuRow(

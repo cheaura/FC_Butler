@@ -5,6 +5,7 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/error_reporter.dart';
 import '../services/ovr_formula.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/badges.dart';
 
 /// 집훈 계산기 (집중훈련 OVR 계산) — Panenka 1.0.4 (2026-08-22).
@@ -14,6 +15,9 @@ import '../widgets/badges.dart';
 ///  ② 스쿼드 카드에서 push: 검색 단계를 건너뛰고 카드·강화·발동 팀컬러가 채워진 채 열림 ("다른 카드"로 검색 가능)
 /// 인벤 계산기와 같은 체계: 총점 = Σ(능력치×가중치) + 100×(강화+팀컬러+적응도), OVR = 총점÷100 내림,
 ///   오버롤 상승 필요 포인트 = 100 − 총점%100, 사용 포인트 = Σ(훈련치×가중치). 적응도 Lv.5 고정(+4).
+/// 팀컬러 3칸(2026-09-04, A안): 강화(물결)·소속·특성을 각각 고르고, '전체 능력치 +N'은 전 스탯에,
+///   세부 효과(예: 시야 +3)는 해당 스탯에만 더한다. 소속 안에 특성이 겹쳐 동시 적용(사용자 확인).
+///   참고 앱 대조: 크바라츠헬리아 26TS RW 123→146→150→155→156 전부 일치(서버 DB 검증 09-04).
 /// 집중훈련 규칙(사용자 확인): 10강 이하 능력치 5개 · 11강 이상 6개 선택, 선택한 능력치마다 +2.
 class TrainingCalcScreen extends StatefulWidget {
   final bool asTab;
@@ -22,6 +26,8 @@ class TrainingCalcScreen extends StatefulWidget {
   final String? season;
   final int grade;
   final int tcBonus;
+  /// 스쿼드에서 발동 중인 팀컬러 자동 채움: {'enhance'|'affiliation'|'feature': [tc_id, level]}
+  final Map<String, List<int>>? tcPreset;
   final String? role;
   final String? faceUrl;
 
@@ -33,6 +39,7 @@ class TrainingCalcScreen extends StatefulWidget {
     this.season,
     this.grade = 1,
     this.tcBonus = 0,
+    this.tcPreset,
     this.role,
     this.faceUrl,
   });
@@ -66,10 +73,19 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
   String _season = '';
   String? _faceUrl;
   int _grade = 1;
-  int _tc = 0;
+  int _tcLegacy = 0; // 구 경로(스쿼드 발동 '전체 +N' 합계) — 3칸을 하나도 고르지 않았을 때만 적용
   String _pos = 'st';
+  // 팀컬러 3칸 (A안): 카드가 고를 수 있는 목록(서버) + 선택
+  static const _tcSections = [
+    ['enhance', '강화 팀컬러'],
+    ['affiliation', '소속 팀컬러'],
+    ['feature', '특성 팀컬러'],
+  ];
+  Map<String, List<Map<String, dynamic>>> _tcOptions = {'enhance': [], 'affiliation': [], 'feature': []};
+  final Map<String, _TcPick?> _tcSel = {'enhance': null, 'affiliation': null, 'feature': null};
+  Map<String, List<int>>? _tcPreset;
+  bool _tcLoading = false;
   Map<String, int>? _base;
-  List<int> _eachOvr = [];
   final Map<String, int> _train = {};
   String? _error;
   bool _loading = false;
@@ -94,6 +110,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
         season: widget.season ?? '',
         grade: widget.grade,
         tc: widget.tcBonus,
+        tcPreset: widget.tcPreset,
         role: widget.role,
         faceUrl: widget.faceUrl,
       );
@@ -142,6 +159,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
     String season = '',
     int grade = 1,
     int tc = 0,
+    Map<String, List<int>>? tcPreset,
     String? role,
     String? faceUrl,
   }) async {
@@ -151,7 +169,10 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
       _season = season;
       _faceUrl = faceUrl ?? 'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png';
       _grade = grade;
-      _tc = tc;
+      _tcLegacy = tc;
+      _tcPreset = tcPreset;
+      _tcOptions = {'enhance': [], 'affiliation': [], 'feature': []};
+      _tcSel.updateAll((k, v) => null);
       _train.clear();
       _base = null;
       _error = null;
@@ -170,14 +191,13 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
       final p = d['player'] as Map;
       final stats = <String, int>{};
       (p['stats'] as Map).forEach((k, v) => stats['$k'] = (v as num).toInt());
-      final eo = (p['each_ovr']?.toString() ?? '').split(',').map((s) => int.tryParse(s.trim()) ?? 0).toList();
       if (!mounted) return;
       setState(() {
         _base = stats;
-        _eachOvr = eo;
         if ((role == null || role.isEmpty) && p['position'] != null) _pos = _pillFor('${p['position']}');
         _loading = false;
       });
+      _loadTcOptions(spid);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -188,18 +208,75 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
     }
   }
 
-  // ── 계산 ──
-  int get _bonus => (kGradeBonus[_grade] ?? 0) + _adapBonus + _tc;
-  int get _slots => _trainSlots(_grade);
-
-  int? _eachOvrAt(String pos) {
-    final i = OvrFormula.positions.indexOf(pos);
-    return i >= 0 && i < _eachOvr.length ? _eachOvr[i] : null;
+  // ── 팀컬러 3칸: 카드가 고를 수 있는 목록(마스터DB) ──
+  Future<void> _loadTcOptions(int spid) async {
+    setState(() => _tcLoading = true);
+    try {
+      final r = await http
+          .get(Uri.parse('${ApiService.baseUrl}/api/user/squad/card-teamcolors?spid=$spid'))
+          .timeout(const Duration(seconds: 20));
+      final d = json.decode(r.body);
+      if (!mounted || _spid != spid) return;
+      if (d['success'] != true) throw Exception(d['message'] ?? '팀컬러 목록 조회 실패');
+      final opts = <String, List<Map<String, dynamic>>>{};
+      (d['options'] as Map? ?? {}).forEach((k, v) {
+        opts['$k'] = (v as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      });
+      setState(() {
+        _tcOptions = {
+          'enhance': opts['enhance'] ?? [],
+          'affiliation': opts['affiliation'] ?? [],
+          'feature': opts['feature'] ?? [],
+        };
+        _tcLoading = false;
+        // 스쿼드에서 넘어온 발동 팀컬러 자동 채움
+        final preset = _tcPreset;
+        if (preset != null) {
+          preset.forEach((sec, v) {
+            if (v.length < 2) return;
+            final pick = _findPick(sec, v[0], v[1]);
+            if (pick != null) _tcSel[sec] = pick;
+          });
+          _tcPreset = null;
+        }
+      });
+    } catch (e) {
+      if (mounted && _spid == spid) setState(() => _tcLoading = false);
+    }
   }
+
+  _TcPick? _findPick(String section, int tcId, int level) {
+    for (final it in _tcOptions[section] ?? const []) {
+      if ((it['tc_id'] as num?)?.toInt() != tcId) continue;
+      for (final lv in (it['levels'] as List? ?? const [])) {
+        if ((lv['level'] as num?)?.toInt() == level) return _TcPick.from(section, it, lv as Map);
+      }
+    }
+    return null;
+  }
+
+  /// 3칸 중 하나라도 골랐으면 그 합, 아니면 구 경로의 '전체 +N'
+  bool get _tcChosen => _tcSel.values.any((p) => p != null);
+  int get _tcAll => _tcChosen ? _tcSel.values.whereType<_TcPick>().fold(0, (a, p) => a + p.all) : _tcLegacy;
+
+  /// 세부 효과 합 (스탯 → +N), '전체 능력치' 제외
+  Map<String, int> get _tcDetail {
+    final out = <String, int>{};
+    for (final p in _tcSel.values.whereType<_TcPick>()) {
+      p.detail.forEach((k, v) => out[k] = (out[k] ?? 0) + v);
+    }
+    return out;
+  }
+
+  // ── 계산 ──
+  int get _bonus => (kGradeBonus[_grade] ?? 0) + _adapBonus + _tcAll;
+  int get _slots => _trainSlots(_grade);
 
   Map<String, num> _eff({bool withTrain = true}) {
     final out = <String, num>{};
-    _base!.forEach((k, v) => out[k] = v + _bonus + (withTrain ? (_train[k] ?? 0) : 0));
+    final detail = _tcDetail;
+    final b = _bonus;
+    _base!.forEach((k, v) => out[k] = v + b + (detail[k] ?? 0) + (withTrain ? (_train[k] ?? 0) : 0));
     return out;
   }
 
@@ -408,7 +485,10 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
     final weighted = OvrFormula.weightsFor(_pos);
     final inW = weighted.map((e) => e.key).toSet();
     final others = OvrFormula.statKeys.where((k) => !inW.contains(k) && _base!.containsKey(k)).toList();
-    final pills = List.of(_groupPills)..sort((a, b) => (_eachOvrAt(b[0]) ?? 0).compareTo(_eachOvrAt(a[0]) ?? 0));
+    // 포지션 핀 OVR: 세부 효과(팀컬러)까지 반영한 현재 조건 값 (훈련 제외)
+    final effBase = _eff(withTrain: false);
+    final pillOvr = {for (final p in _groupPills) p[0]: OvrFormula.calc(effBase, p[0])};
+    final pills = List.of(_groupPills)..sort((a, b) => (pillOvr[b[0]] ?? 0).compareTo(pillOvr[a[0]] ?? 0));
 
     Widget kpi(String k, String v, {Color? color, String? small}) => Expanded(
           child: Container(
@@ -466,7 +546,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                 ],
               ),
               const SizedBox(height: 10),
-              // 강화 · 팀컬러 · 초기화
+              // 강화 · 초기화
               Row(
                 children: [
                   _dropdown<int>(
@@ -478,11 +558,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                     }),
                   ),
                   const SizedBox(width: 8),
-                  _dropdown<int>(
-                    value: _tc,
-                    items: [for (var t = 0; t <= 12; t++) DropdownMenuItem(value: t, child: Text('팀컬러 +$t'))],
-                    onChanged: (v) => setState(() => _tc = v ?? _tc),
-                  ),
+                  Text('적응도 Lv.5', style: TextStyle(fontSize: 11.5, color: muted)),
                   const Spacer(),
                   TextButton(
                     onPressed: _train.isEmpty ? null : () => setState(() => _train.clear()),
@@ -490,6 +566,20 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                   ),
                 ],
               ),
+              const SizedBox(height: 6),
+              // 팀컬러 3칸 (A안): 강화 · 소속 · 특성 — 카드에 해당하는 것만, 누르면 시트
+              Row(
+                children: [
+                  for (var i = 0; i < _tcSections.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 6),
+                    Expanded(child: _tcField(_tcSections[i][0], _tcSections[i][1], muted)),
+                  ],
+                ],
+              ),
+              if (_tcChosen || _tcLegacy > 0) ...[
+                const SizedBox(height: 4),
+                Text(_tcSummary(), style: TextStyle(fontSize: 11, color: muted, height: 1.4)),
+              ],
               const SizedBox(height: 8),
               Row(children: [
                 kpi('오버롤 상승', '$needPt', color: warn, small: '포인트 필요'),
@@ -507,6 +597,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
               const SizedBox(height: 4),
               Text(
                 '총점 $totalPt · $_grade강은 능력치 $_slots개까지, 능력치당 +$_trainStep'
+                '${_tcAll > 0 ? ' · 팀컬러 전체 +$_tcAll' : ''}'
                 '${ovr != baseOvr ? ' · 훈련으로 +${ovr - baseOvr} (전 $baseOvr)' : ''}',
                 style: mono.copyWith(fontSize: 11, color: ovr != baseOvr ? good : muted),
               ),
@@ -521,7 +612,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                   itemBuilder: (_, i) {
                     final p = pills[i];
                     final on = p[0] == _pos;
-                    final o = _eachOvrAt(p[0]);
+                    final o = OvrFormula.groups[p[0]] == null ? null : pillOvr[p[0]];
                     return InkWell(
                       borderRadius: BorderRadius.circular(999),
                       onTap: () => setState(() {
@@ -536,7 +627,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                           border: Border.all(color: on ? accent : muted.withOpacity(.5)),
                           borderRadius: BorderRadius.circular(999),
                         ),
-                        child: Text('${p[1]}${o != null ? ' ${o + _bonus}' : ''}',
+                        child: Text('${p[1]}${o != null ? ' $o' : ''}',
                             style: mono.copyWith(
                                 fontSize: 12, fontWeight: FontWeight.w700, color: on ? Colors.white : muted)),
                       ),
@@ -578,7 +669,8 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
           child: Column(
             children: [
               for (var i = 0; i < weighted.length; i++) ...[
-                _statRow(weighted[i].key, weighted[i].value, eff[weighted[i].key]!.toInt(), accent, good, muted, mono),
+                _statRow(weighted[i].key, weighted[i].value, eff[weighted[i].key]!.toInt(),
+                    _tcDetail[weighted[i].key] ?? 0, accent, good, muted, mono),
                 if (i < weighted.length - 1) Divider(height: 1, color: muted.withOpacity(.15)),
               ],
             ],
@@ -599,7 +691,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                   runSpacing: 6,
                   children: [
                     for (final k in others)
-                      Text('$k ${_base![k]! + _bonus}', style: mono.copyWith(fontSize: 12, color: muted))
+                      Text('$k ${eff[k]?.toInt() ?? _base![k]}', style: mono.copyWith(fontSize: 12, color: muted))
                   ],
                 ),
               ),
@@ -609,8 +701,9 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
         Padding(
           padding: const EdgeInsets.fromLTRB(6, 10, 6, 0),
           child: Text(
-            '총점 = Σ 능력치 × 포지션 가중치 + 100 × (강화 + 팀컬러 + 적응도), OVR = 총점 ÷ 100 내림, '
-            '오버롤 상승 필요 포인트 = 100 − 총점의 나머지. 넥슨 데이터센터 11,396건·집훈 오라클 30건 대조 100% 일치(2026-08-22).',
+            '총점 = Σ (능력치 + 팀컬러 세부 효과) × 포지션 가중치 + 100 × (강화 + 팀컬러 전체 + 적응도), OVR = 총점 ÷ 100 내림, '
+            '오버롤 상승 필요 포인트 = 100 − 총점의 나머지. 넥슨 데이터센터 11,396건·집훈 오라클 30건 대조 100% 일치(2026-08-22). '
+            '팀컬러 3칸은 강화(물결)·소속·특성이 함께 적용되고, 소속 Lv3·4와 특성의 세부 효과는 해당 능력치에만 더해집니다.',
             style: TextStyle(fontSize: 10.5, color: muted),
           ),
         ),
@@ -644,7 +737,84 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
         label: Text.rich(TextSpan(children: spans), style: TextStyle(fontSize: 12, color: good)),
       );
 
-  Widget _statRow(String k, int w, int eff, Color accent, Color good, Color muted, TextStyle mono) {
+  // ── 팀컬러 3칸 UI ──
+  Widget _tcField(String section, String label, Color muted) {
+    final pick = _tcSel[section];
+    final count = (_tcOptions[section] ?? const []).length;
+    final tokens = PanenkaTokens.of(context);
+    final empty = pick == null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: _tcLoading || count == 0 ? null : () => _openTcSheet(section, label),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 5, 6, 5),
+        decoration: BoxDecoration(
+          border: Border.all(color: empty ? muted.withOpacity(.4) : tokens.accentInk.withOpacity(.55)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(fontSize: 9.5, color: muted)),
+                  Text(
+                    _tcLoading
+                        ? '불러오는 중'
+                        : count == 0
+                            ? '해당 없음'
+                            : empty
+                                ? '—'
+                                : 'Lv${pick.level}. ${pick.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: empty ? FontWeight.w500 : FontWeight.w700,
+                        color: count == 0 ? muted : null),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.expand_more, size: 14, color: muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _tcSummary() {
+    if (!_tcChosen) return '스쿼드 발동 팀컬러 전체 +$_tcLegacy (자동) · 칸을 고르면 그 값으로 바뀝니다';
+    final detail = _tcDetail;
+    final parts = <String>['팀컬러 합계 전체 +$_tcAll'];
+    if (detail.isNotEmpty) {
+      parts.add('세부 ${detail.entries.map((e) => '${e.key} +${e.value}').join(' · ')}');
+    }
+    return parts.join(' · ');
+  }
+
+  Future<void> _openTcSheet(String section, String label) async {
+    final items = _tcOptions[section] ?? const [];
+    final current = _tcSel[section];
+    final picked = await showModalBottomSheet<_TcPick?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => _TcSheet(
+        title: label,
+        items: items,
+        section: section,
+        current: current,
+        grade: _grade,
+      ),
+    );
+    if (picked == null) return;
+    setState(() => _tcSel[section] = picked.tcId == 0 ? null : picked);
+  }
+
+  Widget _statRow(String k, int w, int eff, int tcb, Color accent, Color good, Color muted, TextStyle mono) {
     final tr = _train[k] ?? 0;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
@@ -655,7 +825,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(k, style: const TextStyle(fontSize: 13)),
-                Text('+1당 ${w}pt${tr > 0 ? ' · 사용 +${tr * w}pt' : ''}',
+                Text('+1당 ${w}pt${tcb > 0 ? ' · 팀컬러 +$tcb' : ''}${tr > 0 ? ' · 사용 +${tr * w}pt' : ''}',
                     style: mono.copyWith(fontSize: 10.5, color: tr > 0 ? good : muted)),
               ],
             ),
@@ -691,6 +861,140 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
             }),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 팀컬러 선택 1건 (칸 하나에 팀컬러 1개 × 단계 1개)
+class _TcPick {
+  final String section;
+  final int tcId;
+  final String name;
+  final int level;
+  final int count;
+  final int all;
+  final Map<String, int> detail;
+  const _TcPick(this.section, this.tcId, this.name, this.level, this.count, this.all, this.detail);
+
+  /// tcId 0 = '—' (선택 해제)
+  static const none = _TcPick('', 0, '', 0, 0, 0, {});
+
+  factory _TcPick.from(String section, Map<String, dynamic> item, Map lv) {
+    final detail = <String, int>{};
+    for (final e in (lv['effects'] as List? ?? const [])) {
+      final stat = '${e['stat']}';
+      if (stat == '전체 능력치') continue;
+      detail[stat] = (detail[stat] ?? 0) + ((e['value'] as num?)?.toInt() ?? 0);
+    }
+    return _TcPick(section, (item['tc_id'] as num).toInt(), '${item['name'] ?? ''}',
+        (lv['level'] as num?)?.toInt() ?? 1, (lv['count'] as num?)?.toInt() ?? 0,
+        (lv['all'] as num?)?.toInt() ?? 0, detail);
+  }
+
+  String get effectText {
+    final parts = <String>['$count명'];
+    if (all > 0) parts.add('전체 +$all');
+    parts.addAll(detail.entries.map((e) => '${e.key} +${e.value}'));
+    return parts.join(' · ');
+  }
+}
+
+/// 팀컬러 선택 시트: 검색 + 'LvN. 이름' 목록 (카드에 해당하는 것만)
+class _TcSheet extends StatefulWidget {
+  final String title;
+  final String section;
+  final List<Map<String, dynamic>> items;
+  final _TcPick? current;
+  final int grade;
+  const _TcSheet({required this.title, required this.section, required this.items, required this.current, required this.grade});
+
+  @override
+  State<_TcSheet> createState() => _TcSheetState();
+}
+
+class _TcSheetState extends State<_TcSheet> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Colors.grey.shade500;
+    final tokens = PanenkaTokens.of(context);
+    final rows = <_TcPick>[];
+    for (final it in widget.items) {
+      final name = '${it['name'] ?? ''}';
+      if (_q.isNotEmpty && !name.toLowerCase().contains(_q.toLowerCase())) continue;
+      for (final lv in (it['levels'] as List? ?? const [])) {
+        rows.add(_TcPick.from(widget.section, it, lv as Map));
+      }
+    }
+    final minGrade = {for (final it in widget.items) (it['tc_id'] as num).toInt(): (it['min_grade'] as num?)?.toInt() ?? 0};
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * .78),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(width: 36, height: 4, decoration: BoxDecoration(color: muted.withOpacity(.5), borderRadius: BorderRadius.circular(2))),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: Row(children: [
+                  Text(widget.title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 6),
+                  Text('이 카드에 해당하는 것만', style: TextStyle(fontSize: 11, color: muted)),
+                ]),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: TextField(
+                  onChanged: (v) => setState(() => _q = v.trim()),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '검색어를 입력하세요',
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(999)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                  itemCount: rows.length + 1,
+                  separatorBuilder: (_, __) => Divider(height: 1, color: muted.withOpacity(.15)),
+                  itemBuilder: (_, i) {
+                    if (i == 0) {
+                      final on = widget.current == null;
+                      return ListTile(
+                        dense: true,
+                        title: const Text('—'),
+                        subtitle: Text('적용 안 함', style: TextStyle(fontSize: 11, color: muted)),
+                        trailing: on ? Icon(Icons.check, color: tokens.accentInk, size: 18) : null,
+                        onTap: () => Navigator.pop(context, _TcPick.none),
+                      );
+                    }
+                    final p = rows[i - 1];
+                    final on = widget.current != null && widget.current!.tcId == p.tcId && widget.current!.level == p.level;
+                    final mg = minGrade[p.tcId] ?? 0;
+                    final under = mg > 0 && widget.grade < mg;
+                    return ListTile(
+                      dense: true,
+                      title: Text('Lv${p.level}. ${p.name}',
+                          style: TextStyle(fontWeight: on ? FontWeight.w700 : FontWeight.w500, color: under ? muted : null)),
+                      subtitle: Text('${p.effectText}${mg > 0 ? ' · $mg강 이상' : ''}', style: TextStyle(fontSize: 11, color: muted)),
+                      trailing: on ? Icon(Icons.check, color: tokens.accentInk, size: 18) : null,
+                      onTap: () => Navigator.pop(context, p),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

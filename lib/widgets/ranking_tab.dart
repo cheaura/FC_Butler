@@ -416,11 +416,11 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
   // ===== 컷라인 벤토 타일 =====
   Widget _cutTile(String label, Map<String, dynamic> cut) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final tokens = PanenkaTokens.of(context);
     final accent = theme.colorScheme.primary;
-    final bigColor = isDark ? const Color(0xFFC4B5FD) : PanenkaColors.accentDeep;
+    final bigColor = tokens.accentInk;
     final subColor = Colors.grey.shade500;
-    final dividerColor = isDark ? const Color(0xFF26223A) : Colors.grey.shade200;
+    final dividerColor = tokens.line;
 
     final cutRank = cut['cut'] as int;
     final current = (cut['current'] as List).cast<Map<String, String>>();
@@ -512,7 +512,7 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
   Widget _rankListCard(String title, List<Map<String, dynamic>> rankings) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final titleColor = isDark ? const Color(0xFFCFC9E8) : Colors.grey.shade700;
+    final titleColor = isDark ? PanenkaTokens.of(context).ink.withOpacity(0.85) : Colors.grey.shade700;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(13, 12, 13, 6),
@@ -545,8 +545,9 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
   Widget _rankRow(Map<String, dynamic> r, {required bool isLast}) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final tokens = PanenkaTokens.of(context);
     final subColor = Colors.grey.shade500;
-    final dividerColor = isDark ? const Color(0xFF26223A) : Colors.grey.shade200;
+    final dividerColor = tokens.line;
 
     final rankStr = (r['rank'] ?? '').toString();
     final rankNum = int.tryParse(rankStr.replaceAll(',', ''));
@@ -573,8 +574,8 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
         badgeTextColor = const Color(0xFF3A2412);
         break;
       default:
-        badgeBg = isDark ? const Color(0xFF2B2740) : Colors.grey.shade200;
-        badgeTextColor = isDark ? const Color(0xFFA8A3BC) : Colors.grey.shade600;
+        badgeBg = isDark ? tokens.soft : Colors.grey.shade200;
+        badgeTextColor = isDark ? tokens.mute : Colors.grey.shade600;
     }
 
     return Container(
@@ -614,10 +615,13 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
                         height: 10,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(3),
-                          gradient: const LinearGradient(
+                          gradient: LinearGradient(
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
-                              colors: [PanenkaColors.accentDeep, Color(0xFF4C1D95)]),
+                              colors: [
+                                tokens.accentInk,
+                                Color.lerp(tokens.accentInk, Colors.black, 0.35)!
+                              ]),
                         ),
                       ),
                       const SizedBox(width: 3),
