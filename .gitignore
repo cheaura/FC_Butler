@@ -71,3 +71,4 @@ GoogleService-Info.plist
 
 # 백업/작업 보관
 old/
+release/
