@@ -80,6 +80,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   String _matchMode = 'manager_mode';  // manager_mode, official_mode, classic_1on1
   String _matchResult = 'all';  // all, win, draw, lose, error
   String _matchHistoryPeriod = 'all';  // all, 6h, 12h, today, week, month, custom
+  String _matchSeason = 'all';  // 시즌 필터: all / 넥슨 시즌 번호 문자열 / none(시즌 정보 없음) — 2026-09-05
+  List<Map<String, dynamic>> _matchSeasons = [];  // 서버 응답 seasons (모드별 시즌 목록)
   DateTime? _matchHistoryStartDate, _matchHistoryEndDate;
   bool _showMatchHistoryDatePicker = false;
   String _opponentSearch = '';  // 상대팀 검색
@@ -373,12 +375,18 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         period: _matchHistoryPeriod,
         startDate: startDate,
         endDate: endDate,
+        season: _matchSeason,
       );
 
       setState(() {
         if (data['success'] == true) {
           _matchHistory = List<Map<String, dynamic>>.from(data['matches'] ?? []);
           _matchStats = Map<String, int>.from(data['statistics'] ?? {});
+          _matchSeasons = List<Map<String, dynamic>>.from(data['seasons'] ?? []);
+          // 선택 시즌이 목록에 없으면(모드 전환 등) 전체로 복귀
+          if (_matchSeason != 'all' && !_matchSeasons.any((s) => _seasonKey(s['season_id']) == _matchSeason)) {
+            _matchSeason = 'all';
+          }
         } else {
           _matchHistory = [];
           _matchStats = {};
@@ -3156,25 +3164,56 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   _buildFilterButton('감독모드', 'manager_mode', _matchMode, (value) {
                     setState(() {
                       _matchMode = value;
+                      _matchSeason = 'all';  // 모드별 시즌 체계가 다르므로 초기화
                     });
                     _loadMatchHistory();
                   }),
                   _buildFilterButton('공식경기', 'official_mode', _matchMode, (value) {
                     setState(() {
                       _matchMode = value;
+                      _matchSeason = 'all';
                     });
                     _loadMatchHistory();
                   }),
                   _buildFilterButton('클래식1on1', 'classic_1on1', _matchMode, (value) {
                     setState(() {
                       _matchMode = value;
+                      _matchSeason = 'all';
                     });
                     _loadMatchHistory();
                   }),
                 ],
               ),
               const SizedBox(height: 16),
-              
+
+              // 시즌 필터 (2026-09-05) — 1단계 필터: 아래 결과·기간·상대 검색은 선택 시즌 안에서 적용
+              const Text('시즌', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildFilterButton('전체', 'all', _matchSeason, (value) {
+                    setState(() {
+                      _matchSeason = value;
+                    });
+                    _loadMatchHistory();
+                  }),
+                  ..._matchSeasons.map((s) {
+                    final key = _seasonKey(s['season_id']);
+                    final label = s['season_id'] == null ? '시즌 정보 없음' : '${s['season_id']}';
+                    final count = s['count'] ?? 0;
+                    return _buildFilterButton('$label ($count)', key, _matchSeason, (value) {
+                      setState(() {
+                        _matchSeason = value;
+                      });
+                      _loadMatchHistory();
+                    });
+                  }),
+                ],
+              ),
+              const SizedBox(height: 16),
+
               // 결과 필터
               const Text('결과', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -3440,6 +3479,9 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       ),
     );
   }
+
+  /// 시즌 번호 → 필터 값 문자열 (null이면 'none')
+  String _seasonKey(dynamic seasonId) => seasonId == null ? 'none' : '$seasonId';
 
   Widget _buildFilterButton(String label, String value, String currentValue, Function(String) onPressed) {
     final isActive = currentValue == value;

@@ -323,6 +323,7 @@ class ApiService {
     String period = '7',
     String? startDate,
     String? endDate,
+    String season = 'all', // 시즌 필터 (all / 넥슨 시즌 번호 / none) — 2026-09-05
   }) async {
     try {
       final params = {
@@ -332,8 +333,9 @@ class ApiService {
         'period': period,
         if (startDate != null) 'start_date': startDate,
         if (endDate != null) 'end_date': endDate,
+        if (season != 'all') 'season': season,
       };
-      
+
       final uri = Uri.parse('$baseUrl/api/user/match-history').replace(queryParameters: params);
       final response = await http.get(
         uri,
