@@ -414,6 +414,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   Future<void> _loadStatus() async {
     final result = await widget.apiService.getDashboardStatus();
+    // 응답 대기 중 화면이 사라진 경우(로그아웃 직후 등) setState 금지 — iOS 오류 보고 'Null check operator' (09-05)
+    if (!mounted) return;
     if (result['success']) {
       setState(() {
         _accounts = List<Map<String, dynamic>>.from(result['accounts'] ?? []);

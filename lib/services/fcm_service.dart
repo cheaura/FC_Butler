@@ -160,7 +160,8 @@ class FCMService {
     if (st == null) return '네이티브 상태 없음';
     final state = st['state'];
     final err = st['error'];
-    return err == null ? '$state' : '$state: $err';
+    final requested = st['requested'] == true ? ' 요청함' : ' 요청기록없음';
+    return err == null ? '$state$requested' : '$state$requested: $err';
   }
 
   // ───────────────────────── 토큰 발급 ─────────────────────────
