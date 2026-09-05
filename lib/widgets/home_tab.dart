@@ -194,12 +194,18 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     await Future.wait(_rankModes.map((m) async {
       final mode = m[0];
       try {
-        final response = await http.get(
-          Uri.parse(
-              'https://fconline.nexon.com/datacenter/rank_inner?rt=$mode&n4pageno=1'),
-          headers: headers,
-        ).timeout(const Duration(seconds: 12));
-        if (response.statusCode != 200) return;
+        // 세 모드 동시 요청 시 넥슨이 간헐적으로 빈 200 응답을 주므로 행이 없으면 재시도 (2026-09-05)
+        http.Response? response;
+        for (var attempt = 0; attempt < 3; attempt++) {
+          response = await http.get(
+            Uri.parse(
+                'https://fconline.nexon.com/datacenter/rank_inner?rt=$mode&n4pageno=1'),
+            headers: headers,
+          ).timeout(const Duration(seconds: 12));
+          if (response.statusCode == 200 && response.body.contains('rank_no')) break;
+          await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+        }
+        if (response == null || response.statusCode != 200) return;
         final doc = html_parser.parse(response.body);
         final rows = doc.querySelectorAll('.tbody .tr');
         final top = <Map<String, String>>[];

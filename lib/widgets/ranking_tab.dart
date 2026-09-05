@@ -64,6 +64,18 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
   }
 
   // ===== 시즌별 순위 데이터 가져오기 (재시도 포함) =====
+  /// 넥슨 랭킹 페이지 1장 조회 — 행(rank_no)이 없는 빈 200 응답이면 최대 3회 재시도 (2026-09-05)
+  Future<http.Response> _fetchRankPage(String url, Map<String, String> headers) async {
+    http.Response? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final r = await http.get(Uri.parse(url), headers: headers).timeout(const Duration(seconds: 10));
+      last = r;
+      if (r.statusCode == 200 && r.body.contains('rank_no')) return r;
+      await Future.delayed(Duration(milliseconds: 700 * (attempt + 1)));
+    }
+    return last!;
+  }
+
   Future<String?> _fetchSeasonRank(
     Map<String, String> season,
     String rtMode,
@@ -134,11 +146,13 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
           'https://fconline.nexon.com/datacenter/rank_inner?rt=$rtMode${page > 1 ? '&n4pageno=$page' : ''}';
 
       // ===== 병렬 처리: TOP40(1·2p) + 주차컷 페이지 + (모드별) 슈챔컷 페이지 동시 요청 =====
+      // 동시 요청 시 넥슨이 간헐적으로 내용이 빈 200 응답(약 1.8KB)을 주므로 행이 없으면 재시도 (2026-09-05,
+      // 서버에서 재현 — 2vs2 주차컷 페이지가 비어 '데이터가 없습니다'로 보이던 원인)
       final futures = <Future<http.Response>>[
-        http.get(Uri.parse(pageUrl(1)), headers: headers).timeout(Duration(seconds: 10)),
-        http.get(Uri.parse(pageUrl(2)), headers: headers).timeout(Duration(seconds: 10)),
-        http.get(Uri.parse(pageUrl(parkingPage)), headers: headers).timeout(Duration(seconds: 10)),
-        if (superPage > 2) http.get(Uri.parse(pageUrl(superPage)), headers: headers).timeout(Duration(seconds: 10)),
+        _fetchRankPage(pageUrl(1), headers),
+        _fetchRankPage(pageUrl(2), headers),
+        _fetchRankPage(pageUrl(parkingPage), headers),
+        if (superPage > 2) _fetchRankPage(pageUrl(superPage), headers),
       ];
       final responses = await Future.wait(futures);
 
@@ -288,12 +302,12 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
       }
 
       // 상단 상세 목록: 감독모드는 TOP 40(슈챔컷 20위가 그 안에 있음), 1vs1·2vs2는 슈챔컷 부근 81~100위 (2026-08-23 사용자 지시)
-      // 1vs1·2vs2는 1~3위도 함께 보여준다 (2026-09-05 사용자 지시) — 1페이지 상위 3행 + 슈챔컷 부근
+      // 1vs1·2vs2는 1~10위도 함께 보여준다 (2026-09-05 사용자 지시) — 1페이지 상위 10행 + 슈챔컷 부근
       final top3Rows = rtMode == 'manager'
           ? <Map<String, dynamic>>[]
           : page1Rows.where((r) {
               final n = rankOf(r);
-              return n != null && n >= 1 && n <= 3;
+              return n != null && n >= 1 && n <= 10;
             }).toList();
       final cutRows = rtMode == 'manager'
           ? <Map<String, dynamic>>[]
@@ -307,7 +321,7 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
         'top40': topRows,
         'top_title': rtMode == 'manager'
             ? 'TOP 40'
-            : (top3Rows.isEmpty ? cutTitle : 'TOP 3 · $cutTitle'),
+            : (top3Rows.isEmpty ? cutTitle : 'TOP 10 · $cutTitle'),
 'bottom': bottomList,
         'date_info': dateInfo,
         'cutlines': {
