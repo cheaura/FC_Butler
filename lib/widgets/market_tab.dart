@@ -118,6 +118,22 @@ class _MarketTabState extends State<MarketTab>
     }
   }
 
+  /// API 키 '변경' — 실수 방지용 확인창을 거친 뒤에만 지운다 (2026-09-05 사용자 지적: 누르자마자 등록 키가 사라짐)
+  Future<void> _confirmClearSettings() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('API 키 변경'),
+        content: const Text('현재 등록된 API 키와 감독명, 불러온 거래 내역이 지워지고\n새 키를 입력하는 화면으로 이동합니다.\n계속할까요?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('변경')),
+        ],
+      ),
+    );
+    if (ok == true) await _clearSettings();
+  }
+
   Future<void> _clearSettings() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyPref);
@@ -625,7 +641,7 @@ class _MarketTabState extends State<MarketTab>
               Text('API 키 등록됨',
                   style: TextStyle(fontSize: 12, color: _subColor)),
               TextButton(
-                onPressed: _clearSettings,
+                onPressed: _confirmClearSettings,
                 style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact),
                 child: const Text('변경', style: TextStyle(fontSize: 12)),

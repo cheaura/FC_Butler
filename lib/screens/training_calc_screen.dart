@@ -367,6 +367,7 @@ if (widget.spid != null) {
             controller: _searchCtrl,
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
+            onChanged: (_) => setState(() {}), // x 버튼 표시 갱신
             decoration: InputDecoration(
               isDense: true,
               hintText: '선수명 (게임 내 등록명, 일부 가능)',
@@ -375,7 +376,21 @@ if (widget.spid != null) {
                   ? const Padding(
                       padding: EdgeInsets.all(10),
                       child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
-                  : IconButton(icon: const Icon(Icons.arrow_forward, size: 18), onPressed: _search),
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 입력·결과 지우기 (검색 탭과 동일) — 지우면 최근 선택 카드가 다시 보인다 (2026-09-05)
+                        if (_searchCtrl.text.isNotEmpty || _results.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () => setState(() {
+                              _searchCtrl.clear();
+                              _results = [];
+                            }),
+                          ),
+                        IconButton(icon: const Icon(Icons.arrow_forward, size: 18), onPressed: _search),
+                      ],
+                    ),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
