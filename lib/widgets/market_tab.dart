@@ -19,8 +19,11 @@ class MarketTab extends StatefulWidget {
 
 class _MarketTabState extends State<MarketTab>
     with AutomaticKeepAliveClientMixin {
-  static const _keyPref = 'nexon_api_key';
-  static const _namePref = 'nexon_api_nickname';
+  static const _keyPref = 'nexon_api_key';        // 구버전 단일 키 (마이그레이션용)
+  static const _namePref = 'nexon_api_nickname';  // 구버전 단일 감독명 (마이그레이션용)
+  // 다중 계정 (2026-09-05): 감독명+API 키 묶음 목록과 현재 선택 인덱스. 한 사람이 여러 계정을 쓰는 경우 대비.
+  static const _accountsPref = 'nexon_api_accounts_v1';
+  static const _accountIdxPref = 'nexon_api_account_index';
   static const _issueUrl = 'https://openapi.nexon.com/ko/game/fconline/?id=2';
   static const _apiBase = 'https://open.api.nexon.com';
 
@@ -36,6 +39,9 @@ class _MarketTabState extends State<MarketTab>
   String? _nickname;
   bool _saving = false;
   String? _error;
+  List<Map<String, String>> _accounts = []; // [{name, key}] — 현재 계정은 _accountIdx
+  int _accountIdx = 0;
+  bool _addingAccount = false; // '계정 추가' 중이면 기존 계정이 있어도 등록 화면 표시
 
   int _seg = 0; // 0=거래내역, 1=스쿼드 손익
   String _tradeType = 'buy';
@@ -69,20 +75,87 @@ class _MarketTabState extends State<MarketTab>
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    var accounts = <Map<String, String>>[];
+    try {
+      final raw = prefs.getString(_accountsPref);
+      if (raw != null) {
+        accounts = (json.decode(raw) as List)
+            .map((e) => {'name': '${e['name'] ?? ''}', 'key': '${e['key'] ?? ''}'})
+            .where((a) => a['key']!.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {
+      accounts = [];
+    }
+    // 구버전(단일 키) 마이그레이션 — 감독명이 없으면 손익 화면에서 입력받는다
+    if (accounts.isEmpty) {
+      final oldKey = prefs.getString(_keyPref);
+      if (oldKey != null && oldKey.isNotEmpty) {
+        accounts = [{'name': prefs.getString(_namePref) ?? '', 'key': oldKey}];
+        await prefs.setString(_accountsPref, json.encode(accounts));
+        await prefs.remove(_keyPref);
+        await prefs.remove(_namePref);
+      }
+    }
+    var idx = prefs.getInt(_accountIdxPref) ?? 0;
+    if (idx < 0 || idx >= accounts.length) idx = 0;
     if (!mounted) return;
     setState(() {
-      _apiKey = prefs.getString(_keyPref);
-      _nickname = prefs.getString(_namePref);
+      _accounts = accounts;
+      _accountIdx = idx;
+      _apiKey = accounts.isEmpty ? null : accounts[idx]['key'];
+      _nickname = accounts.isEmpty ? null : (accounts[idx]['name']!.isEmpty ? null : accounts[idx]['name']);
     });
     if (_apiKey != null && (_trades['buy']!.isEmpty)) {
       _loadTrades(reset: true);
     }
   }
 
+  Future<void> _persistAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_accountsPref, json.encode(_accounts));
+    await prefs.setInt(_accountIdxPref, _accountIdx);
+  }
+
+  /// 조회 상태 초기화 (계정 전환·삭제 시)
+  void _resetData() {
+    _trades['buy'] = [];
+    _trades['sell'] = [];
+    _offsets['buy'] = 0;
+    _offsets['sell'] = 0;
+    _exhausted['buy'] = false;
+    _exhausted['sell'] = false;
+    _pnl = [];
+    _pnlFormation = '';
+    _error = null;
+  }
+
+  /// 계정 전환 — 해당 계정의 키·감독명으로 바꾸고 거래내역을 다시 불러온다
+  Future<void> _selectAccount(int i) async {
+    if (i < 0 || i >= _accounts.length || i == _accountIdx) return;
+    setState(() {
+      _accountIdx = i;
+      _apiKey = _accounts[i]['key'];
+      _nickname = _accounts[i]['name']!.isEmpty ? null : _accounts[i]['name'];
+      _resetData();
+    });
+    await _persistAccounts();
+    _loadTrades(reset: true);
+  }
+
   Future<void> _saveSettings() async {
     final key = _keyController.text.trim();
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = '본인 감독명을 입력해주세요.');
+      return;
+    }
     if (key.isEmpty) {
       setState(() => _error = 'API 키를 입력해주세요.');
+      return;
+    }
+    if (_accounts.any((a) => a['key'] == key)) {
+      setState(() => _error = '이미 등록된 API 키입니다.');
       return;
     }
     setState(() {
@@ -107,9 +180,29 @@ class _MarketTabState extends State<MarketTab>
             _error = 'API 키가 올바르지 않습니다. (응답 ${response.statusCode})');
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyPref, key);
-      setState(() => _apiKey = key);
+      // 감독명 존재 검증 (/id) — 손익 조회에 쓰인다
+      final idResp = await http.get(
+        Uri.parse('$_apiBase/fconline/v1/id?nickname=${Uri.encodeComponent(name)}'),
+        headers: {'x-nxopen-api-key': key},
+      ).timeout(const Duration(seconds: 15));
+      final idData = json.decode(idResp.body);
+      if (idResp.statusCode != 200 || idData['ouid'] == null) {
+        setState(() => _error = idResp.statusCode == 400
+            ? '감독명을 찾을 수 없습니다. 본인 감독명을 확인해주세요.'
+            : '감독명 확인에 실패했습니다. (응답 ${idResp.statusCode})');
+        return;
+      }
+      setState(() {
+        _accounts.add({'name': name, 'key': key});
+        _accountIdx = _accounts.length - 1;
+        _apiKey = key;
+        _nickname = name;
+        _addingAccount = false;
+        _keyController.clear();
+        _nameController.clear();
+        _resetData();
+      });
+      await _persistAccounts();
       _loadTrades(reset: true);
     } catch (e) {
       setState(() => _error = '네트워크 오류가 발생했습니다.');
@@ -118,16 +211,16 @@ class _MarketTabState extends State<MarketTab>
     }
   }
 
-  /// API 키 '변경' — 실수 방지용 확인창을 거친 뒤에만 지운다 (2026-09-05 사용자 지적: 누르자마자 등록 키가 사라짐)
+  /// 현재 계정 삭제 — 실수 방지용 확인창을 거친 뒤에만 지운다 (2026-09-05 사용자 지적: 누르자마자 등록 키가 사라짐)
   Future<void> _confirmClearSettings() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('API 키 변경'),
-        content: const Text('현재 등록된 API 키와 감독명, 불러온 거래 내역이 지워지고\n새 키를 입력하는 화면으로 이동합니다.\n계속할까요?'),
+        title: const Text('계정 삭제'),
+        content: Text('${_nickname ?? '현재'} 계정의 API 키와 불러온 거래 내역이 이 기기에서 지워집니다.\n계속할까요?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('변경')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('삭제')),
         ],
       ),
     );
@@ -135,18 +228,15 @@ class _MarketTabState extends State<MarketTab>
   }
 
   Future<void> _clearSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyPref);
-    await prefs.remove(_namePref);
     setState(() {
-      _apiKey = null;
-      _nickname = null;
-      _trades['buy'] = [];
-      _trades['sell'] = [];
-      _offsets['buy'] = 0;
-      _offsets['sell'] = 0;
-      _pnl = [];
+      if (_accountIdx >= 0 && _accountIdx < _accounts.length) _accounts.removeAt(_accountIdx);
+      _accountIdx = 0;
+      _apiKey = _accounts.isEmpty ? null : _accounts[0]['key'];
+      _nickname = _accounts.isEmpty ? null : (_accounts[0]['name']!.isEmpty ? null : _accounts[0]['name']);
+      _resetData();
     });
+    await _persistAccounts();
+    if (_apiKey != null) _loadTrades(reset: true);
   }
 
   /// 스쿼드 손익용 감독명 저장 — 존재 검증(/id) 후 저장하고 바로 손익 조회
@@ -173,9 +263,11 @@ class _MarketTabState extends State<MarketTab>
             : '감독명 확인에 실패했습니다. (응답 ${response.statusCode})');
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_namePref, name);
-      setState(() => _nickname = name);
+      setState(() {
+        _nickname = name;
+        if (_accountIdx < _accounts.length) _accounts[_accountIdx]['name'] = name;
+      });
+      await _persistAccounts();
       _loadPnl();
     } catch (e) {
       setState(() => _error = '네트워크 오류가 발생했습니다.');
@@ -184,10 +276,8 @@ class _MarketTabState extends State<MarketTab>
     }
   }
 
-  /// 감독명 변경 — 저장값을 지우고 입력 화면으로 (API 키는 유지)
+  /// 감독명 변경 — 입력 화면으로 (API 키·계정은 유지, 저장은 조회 성공 시)
   Future<void> _clearNickname() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_namePref);
     setState(() {
       _nameController.text = _nickname ?? '';
       _nickname = null;
@@ -507,7 +597,7 @@ class _MarketTabState extends State<MarketTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    if (_apiKey == null) return _buildSetup();
+    if (_apiKey == null || _addingAccount) return _buildSetup();
     return _buildMain();
   }
 
@@ -518,10 +608,25 @@ class _MarketTabState extends State<MarketTab>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('이적시장',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+          Row(
+            children: [
+              Text(_addingAccount ? '계정 추가' : '이적시장',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const Spacer(),
+              if (_accounts.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _addingAccount = false;
+                    _error = null;
+                  }),
+                  child: const Text('취소'),
+                ),
+            ],
+          ),
           const SizedBox(height: 4),
-          Text('본인의 이적시장 구매/판매 내역과 스쿼드 손익을 조회합니다.',
+          Text(_addingAccount
+                  ? '다른 계정의 감독명과 API 키를 등록하면 상단 메뉴에서 계정을 전환할 수 있습니다.'
+                  : '본인의 이적시장 구매/판매 내역과 스쿼드 손익을 조회합니다.',
               style: TextStyle(fontSize: 13, color: _subColor)),
           const SizedBox(height: 16),
           Card(
@@ -554,6 +659,15 @@ class _MarketTabState extends State<MarketTab>
             ),
           ),
           const SizedBox(height: 14),
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: '본인 감독명',
+              hintText: '이 API 키 계정의 게임 내 감독명',
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 10),
           TextField(
             controller: _keyController,
             decoration: const InputDecoration(
@@ -636,15 +750,53 @@ class _MarketTabState extends State<MarketTab>
               const Text('이적시장',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
               const Spacer(),
-              Icon(Icons.key, size: 14, color: _accent),
-              const SizedBox(width: 4),
-              Text('API 키 등록됨',
-                  style: TextStyle(fontSize: 12, color: _subColor)),
-              TextButton(
-                onPressed: _confirmClearSettings,
-                style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact),
-                child: const Text('변경', style: TextStyle(fontSize: 12)),
+              // 계정 메뉴 (2026-09-05): 등록된 계정 전환 · 계정 추가 · 현재 계정 삭제
+              PopupMenuButton<String>(
+                tooltip: '계정 전환',
+                onSelected: (v) {
+                  if (v == '__add') {
+                    setState(() {
+                      _addingAccount = true;
+                      _error = null;
+                      _keyController.clear();
+                      _nameController.clear();
+                    });
+                  } else if (v == '__del') {
+                    _confirmClearSettings();
+                  } else {
+                    _selectAccount(int.tryParse(v) ?? _accountIdx);
+                  }
+                },
+                itemBuilder: (_) => [
+                  for (var i = 0; i < _accounts.length; i++)
+                    PopupMenuItem<String>(
+                      value: '$i',
+                      child: Row(children: [
+                        Icon(i == _accountIdx ? Icons.check : Icons.person_outline, size: 16),
+                        const SizedBox(width: 8),
+                        Text(_accounts[i]['name']!.isEmpty ? '감독명 미입력' : _accounts[i]['name']!),
+                      ]),
+                    ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem<String>(
+                    value: '__add',
+                    child: Row(children: [Icon(Icons.add, size: 16), SizedBox(width: 8), Text('계정 추가')]),
+                  ),
+                  const PopupMenuItem<String>(
+                    value: '__del',
+                    child: Row(children: [Icon(Icons.delete_outline, size: 16), SizedBox(width: 8), Text('현재 계정 삭제')]),
+                  ),
+                ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.key, size: 14, color: _accent),
+                    const SizedBox(width: 4),
+                    Text(_nickname ?? 'API 키 등록됨',
+                        style: TextStyle(fontSize: 12, color: _subColor)),
+                    Icon(Icons.arrow_drop_down, size: 18, color: _subColor),
+                  ],
+                ),
               ),
             ],
           ),
