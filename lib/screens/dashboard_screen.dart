@@ -90,7 +90,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   // 전적 데이터 (페이지네이션)
   List<Map<String, dynamic>> _matchHistory = [];
   bool _matchHistoryLoading = false;
-  Map<String, int> _matchStats = {};
+  Map<String, num> _matchStats = {};  // 서버 statistics (win_rate는 소수) — 2026-09-05
   int _displayedMatchCount = 10;  // 처음에 10경기만 표시
   final int _matchesPerPage = 10;  // 한 번에 로드할 경기 수
 
@@ -381,7 +381,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       setState(() {
         if (data['success'] == true) {
           _matchHistory = List<Map<String, dynamic>>.from(data['matches'] ?? []);
-          _matchStats = Map<String, int>.from(data['statistics'] ?? {});
+          _matchStats = Map<String, num>.from(data['statistics'] ?? {});
           _matchSeasons = List<Map<String, dynamic>>.from(data['seasons'] ?? []);
           // 선택 시즌이 목록에 없으면(모드 전환 등) 전체로 복귀
           if (_matchSeason != 'all' && !_matchSeasons.any((s) => _seasonKey(s['season_id']) == _matchSeason)) {
