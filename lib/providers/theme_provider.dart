@@ -1,3 +1,4 @@
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -52,7 +53,7 @@ class PanenkaPreset {
   });
 }
 
-/// 사용자 선택 가능한 프리셋 6종 (순서 = 더보기 › 색상 화면 나열 순서)
+/// 사용자 선택 가능한 프리셋 7종 (순서 = 더보기 › 색상 화면 나열 순서, 8번째 칸은 '직접 만들기' 카드) = 더보기 › 색상 화면 나열 순서)
 /// 수치는 참고 이미지 ex4 실측 채도·명도 기준 (띠 s26 l21 · 승 s32 l66 · 패 s33 l42 · 강조 s82 l71)
 const List<PanenkaPreset> kPanenkaPresets = [
   PanenkaPreset(
@@ -133,7 +134,170 @@ const List<PanenkaPreset> kPanenkaPresets = [
     lose: Color(0xFF8E4D48),
     liveBg: Color(0xFF462B38),
   ),
+  // 2026-09-05 추가 (사용자 요청): 검은 띠 · 핑크 강조. 띠는 거의 무채색(s8 l16)으로 바탕보다 조금만 밝게,
+  // 강조는 다른 프리셋과 같은 s82 l71, 승은 차분한 라벤더, 패는 테라코타 유지
+  PanenkaPreset(
+    id: 'blackpink',
+    name: '블랙 핑크',
+    note: '검은 띠 · 핑크 강조',
+    bg: Color(0xFF1D1B1C),
+    card: Color(0xFF242122),
+    band: Color(0xFF2C2628),
+    accent: Color(0xFFF278A1),
+    sub: Color(0xFFE7B1C3),
+    win: Color(0xFFA48DC4),
+    lose: Color(0xFF8E5648),
+    liveBg: Color(0xFF462B34),
+  ),
 ];
+
+// ───────────────────────── 직접 만들기 (2026-09-05, 2단계) ─────────────────────────
+// 완전 자유 색상환은 두지 않는다(기각). 띠색·강조색은 색조(hue)만 고르고, 채도·명도는
+// 승인된 프리셋 실측값(ex4)으로 고정해 어떤 조합에서도 톤이 튀지 않게 한다.
+// 승/패는 어울리는 짝으로만 고른다(승 = 차분한 한색, 패 = 테라코타 계열).
+// 나머지 색(bg/card/liveBg/sub)은 고른 색조에서 자동 계산한다.
+
+/// 프리셋 실측 채도·명도 — 직접 만들기 칩 정규화 값 (채도를 다시 올리지 말 것)
+const double _kBandS = 0.26, _kBandL = 0.21;
+const double _kAccentS = 0.82, _kAccentL = 0.71;
+const double _kWinS = 0.32, _kWinL = 0.66;
+const double _kLoseS = 0.33, _kLoseL = 0.42;
+const double _kBgS = 0.05, _kBgL = 0.11, _kCardL = 0.135;
+const double _kLiveS = 0.24, _kLiveL = 0.22;
+const double _kSubS = 0.53, _kSubL = 0.80;
+
+Color _hsl(double h, double s, double l) =>
+    HSLColor.fromAHSL(1, h % 360, s, l).toColor();
+
+/// 띠색·강조색 칩 색조 12종 (30° 간격)
+const List<double> kPanenkaHueChips = [
+  0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330,
+];
+
+/// 띠색 칩 미리보기 색 (프리셋 띠와 같은 채도·명도)
+Color panenkaBandChip(double hue) => _hsl(hue, _kBandS, _kBandL);
+
+/// 강조색 칩 미리보기 색 (프리셋 강조와 같은 채도·명도)
+Color panenkaAccentChip(double hue) => _hsl(hue, _kAccentS, _kAccentL);
+
+/// 승/패 짝 — 승은 차분한 한색, 패는 테라코타 계열 (승인 시안 규칙 유지)
+@immutable
+class PanenkaWinLosePair {
+  final String name;
+  final double winHue;
+  final double loseHue;
+  const PanenkaWinLosePair(
+      {required this.name, required this.winHue, required this.loseHue});
+
+  Color get win => _hsl(winHue, _kWinS, _kWinL);
+  Color get lose => _hsl(loseHue, _kLoseS, _kLoseL);
+}
+
+const List<PanenkaWinLosePair> kPanenkaWinLosePairs = [
+  PanenkaWinLosePair(name: '블루 · 테라코타', winHue: 213, loseHue: 12),
+  PanenkaWinLosePair(name: '민트 · 적갈', winHue: 163, loseHue: 10),
+  PanenkaWinLosePair(name: '청록 · 벽돌', winHue: 185, loseHue: 8),
+  PanenkaWinLosePair(name: '초록 · 빨강', winHue: 140, loseHue: 4),
+  PanenkaWinLosePair(name: '라벤더 · 갈색', winHue: 250, loseHue: 22),
+  PanenkaWinLosePair(name: '하늘 · 주황', winHue: 200, loseHue: 18),
+];
+
+/// 직접 만들기 선택값 — 띠 색조·강조 색조·승패 짝 번호 (prefs 'colorCustom'에 JSON 저장)
+@immutable
+class PanenkaCustomSpec {
+  final double bandHue;
+  final double accentHue;
+  final int pairIndex;
+
+  const PanenkaCustomSpec({
+    required this.bandHue,
+    required this.accentHue,
+    required this.pairIndex,
+  });
+
+  /// 저장값이 없을 때 시작값 (퍼플 프리셋에 가장 가까운 칩)
+  static const PanenkaCustomSpec fallback =
+      PanenkaCustomSpec(bandHue: 270, accentHue: 240, pairIndex: 0);
+
+  static double _nearestHue(double hue) {
+    double best = kPanenkaHueChips.first;
+    double bestD = 999;
+    for (final h in kPanenkaHueChips) {
+      var d = (h - hue).abs();
+      if (d > 180) d = 360 - d;
+      if (d < bestD) {
+        bestD = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  static int _nearestPair(Color win) {
+    final hue = HSLColor.fromColor(win).hue;
+    var best = 0;
+    double bestD = 999;
+    for (var i = 0; i < kPanenkaWinLosePairs.length; i++) {
+      var d = (kPanenkaWinLosePairs[i].winHue - hue).abs();
+      if (d > 180) d = 360 - d;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /// 현재 프리셋에서 가장 가까운 칩으로 시작값을 만든다 (직접 만들기 첫 진입용)
+  factory PanenkaCustomSpec.fromPreset(PanenkaPreset p) => PanenkaCustomSpec(
+        bandHue: _nearestHue(HSLColor.fromColor(p.band).hue),
+        accentHue: _nearestHue(HSLColor.fromColor(p.accent).hue),
+        pairIndex: _nearestPair(p.win),
+      );
+
+  PanenkaWinLosePair get pair =>
+      kPanenkaWinLosePairs[pairIndex.clamp(0, kPanenkaWinLosePairs.length - 1)];
+
+  /// 선택값 → 프리셋 (id 'custom'). 채도·명도는 전부 고정값, 색조만 반영.
+  PanenkaPreset toPreset() => PanenkaPreset(
+        id: 'custom',
+        name: '직접 만들기',
+        note: '띠 · 강조 · 승패 직접 선택',
+        bg: _hsl(bandHue, _kBgS, _kBgL),
+        card: _hsl(bandHue, _kBgS, _kCardL),
+        band: _hsl(bandHue, _kBandS, _kBandL),
+        accent: _hsl(accentHue, _kAccentS, _kAccentL),
+        sub: _hsl(pair.winHue, _kSubS, _kSubL),
+        win: pair.win,
+        lose: pair.lose,
+        liveBg: _hsl(bandHue, _kLiveS, _kLiveL),
+      );
+
+  PanenkaCustomSpec copyWith(
+          {double? bandHue, double? accentHue, int? pairIndex}) =>
+      PanenkaCustomSpec(
+        bandHue: bandHue ?? this.bandHue,
+        accentHue: accentHue ?? this.accentHue,
+        pairIndex: pairIndex ?? this.pairIndex,
+      );
+
+  Map<String, dynamic> toJson() =>
+      {'band': bandHue, 'accent': accentHue, 'pair': pairIndex};
+
+  /// 저장값 복원 — 형식이 깨졌으면 null (호출 쪽에서 fallback)
+  static PanenkaCustomSpec? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final b = raw['band'];
+    final a = raw['accent'];
+    final p = raw['pair'];
+    if (b is! num || a is! num || p is! num) return null;
+    return PanenkaCustomSpec(
+      bandHue: _nearestHue(b.toDouble()),
+      accentHue: _nearestHue(a.toDouble()),
+      pairIndex: p.toInt().clamp(0, kPanenkaWinLosePairs.length - 1),
+    );
+  }
+}
 
 // ───────────────────────── 색 계산 유틸 (라이트 파생용) ─────────────────────────
 
@@ -249,8 +413,10 @@ class PanenkaTokens extends ThemeExtension<PanenkaTokens> {
         bandInk: const Color(0xFFF2F1EC),
         ink: const Color(0xFFF2F1EC),
         mute: const Color(0xFFA5A3AD),
-        accentBand: p.accent,
-        accentInk: panenkaInkOn(p.accent, p.card),
+        // 띠 위 강조·경기 중 띠 글자는 3:1 보장 (직접 만들기 조합에서 파란 강조 × 초록·노란 띠가 2.9까지 내려감,
+        // 프리셋 7종은 이미 통과라 값 변화 없음)
+        accentBand: panenkaInkOn(p.accent, p.band, target: 3.0),
+        accentInk: panenkaInkOn(panenkaInkOn(p.accent, p.card), p.liveBg, target: 3.0),
         accentSoft: p.accent.withOpacity(0.18),
         accentSoftBand: p.accent.withOpacity(0.18),
         subInk: panenkaInkOn(p.sub, p.card, target: 3.0),
@@ -277,8 +443,9 @@ class PanenkaTokens extends ThemeExtension<PanenkaTokens> {
       bandInk: const Color(0xFFF2F1EC),
       ink: const Color(0xFF1A1D24),
       mute: const Color(0xFF6B7080),
-      accentBand: p.accent,
-      accentInk: panenkaInkOn(p.accent, card),
+      accentBand: panenkaInkOn(p.accent, p.band, target: 3.0),
+      accentInk: panenkaInkOn(panenkaInkOn(p.accent, card),
+          Color.lerp(Colors.white, p.accent, 0.18)!, target: 3.0),
       accentSoft: Color.lerp(Colors.white, p.accent, 0.16)!,
       accentSoftBand: p.accent.withOpacity(0.18),
       subInk: panenkaInkOn(p.sub, card),
@@ -385,12 +552,21 @@ class PanenkaTokens extends ThemeExtension<PanenkaTokens> {
 class ThemeProvider with ChangeNotifier {
   static const String _kDarkKey = 'isDarkMode';
   static const String _kPresetKey = 'colorPreset';
+  static const String _kCustomKey = 'colorCustom'; // 직접 만들기 선택값 (JSON)
 
   bool _isDarkMode = true; // 기본값 다크테마 (브랜드 기본)
   PanenkaPreset _preset = kPanenkaPresets.first;
+  PanenkaCustomSpec _custom = PanenkaCustomSpec.fallback;
+  bool _hasCustom = false; // 직접 만들기 값을 한 번이라도 저장했는지
 
   bool get isDarkMode => _isDarkMode;
   PanenkaPreset get preset => _preset;
+  /// 직접 만들기 선택값 (마지막으로 만든 조합 — 프리셋으로 돌아가도 유지)
+  PanenkaCustomSpec get custom => _custom;
+  /// 현재 적용 중인 것이 직접 만들기인지
+  bool get isCustom => _preset.id == 'custom';
+  /// 직접 만들기 조합을 한 번이라도 저장했는지 (색상 화면 마지막 카드 미리보기용)
+  bool get hasCustom => _hasCustom;
 
   ThemeProvider() {
     _loadThemePreference();
@@ -402,8 +578,22 @@ class ThemeProvider with ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _isDarkMode = prefs.getBool(_kDarkKey) ?? true; // 기본값 다크테마
       final id = prefs.getString(_kPresetKey);
-      _preset = kPanenkaPresets.firstWhere((p) => p.id == id,
-          orElse: () => kPanenkaPresets.first);
+      final rawCustom = prefs.getString(_kCustomKey);
+      if (rawCustom != null) {
+        try {
+          final parsed = PanenkaCustomSpec.fromJson(jsonDecode(rawCustom));
+          _custom = parsed ?? PanenkaCustomSpec.fallback;
+          _hasCustom = parsed != null;
+        } catch (_) {
+          _custom = PanenkaCustomSpec.fallback;
+        }
+      }
+      if (id == 'custom') {
+        _preset = _custom.toPreset();
+      } else {
+        _preset = kPanenkaPresets.firstWhere((p) => p.id == id,
+            orElse: () => kPanenkaPresets.first);
+      }
       notifyListeners();
     } catch (e) {
       print('[ThemeProvider] 테마 설정 로드 실패: $e');
@@ -434,6 +624,22 @@ class ThemeProvider with ChangeNotifier {
       await prefs.setString(_kPresetKey, preset.id);
     } catch (e) {
       print('[ThemeProvider] 색상 프리셋 저장 실패: $e');
+    }
+  }
+
+  // 직접 만들기 선택 및 저장 (더보기 › 색상 › 직접 만들기) — 칩을 누를 때마다 즉시 적용
+  Future<void> setCustom(PanenkaCustomSpec spec) async {
+    _custom = spec;
+    _hasCustom = true;
+    _preset = spec.toPreset();
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kCustomKey, jsonEncode(spec.toJson()));
+      await prefs.setString(_kPresetKey, 'custom');
+    } catch (e) {
+      print('[ThemeProvider] 직접 만들기 색상 저장 실패: $e');
     }
   }
 

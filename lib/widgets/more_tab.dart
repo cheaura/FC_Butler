@@ -9,7 +9,7 @@ import '../screens/color_settings_screen.dart';
 import '../services/error_reporter.dart';
 import '../services/api_service.dart';
 
-/// 더보기 탭 — 계정(로그인/로그아웃/계정삭제) · 테마 · 약관/방침 · 앱 정보 · 고지 문구.
+/// 더보기 탭 — 계정(로그인/로그아웃/계정삭제) · 색상(다크 모드 포함) · 약관/방침 · 앱 정보 · 고지 문구.
 class MoreTab extends StatefulWidget {
   /// 로그인/로그아웃으로 계정 상태가 바뀌었을 때 부모(탭 셸) 갱신용
   final VoidCallback? onAccountChanged;
@@ -225,18 +225,9 @@ class _MoreTabState extends State<MoreTab> {
               MaterialPageRoute(builder: (context) => const FeedbackScreen()),
             ),
           ),
-          // 설정
-          _menuRow(
-            icon: themeProvider.isDarkMode
-                ? Icons.dark_mode
-                : Icons.light_mode,
-            title: '테마',
-            trailing: Switch(
-              value: themeProvider.isDarkMode,
-              onChanged: (_) => themeProvider.toggleTheme(),
-            ),
-          ),
           // 색상 프리셋 (2026-09-04): 카드 선택만으로 앱 전체 색 변경
+          // (2026-09-05) 별도 '테마' 다크모드 스위치 행은 제거 — 색상 화면 안의 다크 모드 스위치로 통합.
+          //  현재 상태는 이 행 오른쪽에 '프리셋 · 다크/라이트'로 표시
           _menuRow(
             icon: Icons.palette_outlined,
             title: '색상',
@@ -244,7 +235,8 @@ class _MoreTabState extends State<MoreTab> {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(themeProvider.preset.name,
+                Text(
+                    '${themeProvider.preset.name} · ${themeProvider.isDarkMode ? '다크' : '라이트'}',
                     style: TextStyle(fontSize: 13, color: _subColor)),
                 const SizedBox(width: 4),
                 Icon(Icons.chevron_right, size: 18, color: _subColor),

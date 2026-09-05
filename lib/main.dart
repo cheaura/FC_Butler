@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -22,8 +23,9 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     
-    // FCM 초기화
-    await FCMService().initialize();
+    // FCM 초기화 — 기다리지 않는다 (2026-09-05): iOS에서 APNs 토큰 대기(최대 10s)가 runApp을 막아
+    // 앱 실행이 20초 넘게 걸리던 문제. 권한 요청·리스너 등록·토큰 발급은 백그라운드에서 이어진다.
+    unawaited(FCMService().initialize());
   } catch (e) {
     // Firebase 초기화 실패 시에도 앱은 계속 실행
     print('Firebase/FCM 초기화 오류: $e');
@@ -84,9 +86,10 @@ class _SplashScreenState extends State<SplashScreen> {
     if (result['success'] == true && result['account_type'] == 'macro') {
       // 매크로 연동 계정 - FCM 토큰 전송 후 탭 셸(매크로 탭에서 시작)로
       // 매크로 대시보드는 셸의 매크로 탭에 그대로 임베드 (기능·표현 전부 유지)
+      // (2026-09-05) 화면 전환을 막지 않는다 — FCM 토큰이 아직 없으면 발급 완료 시 백그라운드로 전송된다
       final token = _apiService.token;
       if (token != null) {
-        await FCMService().sendTokenToServerWithAuth(token);
+        unawaited(FCMService().sendTokenToServerWithAuth(token));
       }
       target = const PublicHomeScreen(
           initialIndex: PublicHomeScreen.macroTabIndex);
