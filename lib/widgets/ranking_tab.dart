@@ -288,18 +288,27 @@ class _RankingTabState extends State<RankingTab> with AutomaticKeepAliveClientMi
       }
 
       // 상단 상세 목록: 감독모드는 TOP 40(슈챔컷 20위가 그 안에 있음), 1vs1·2vs2는 슈챔컷 부근 81~100위 (2026-08-23 사용자 지시)
-      final topRows = rtMode == 'manager'
-          ? [...page1Rows, ...page2Rows]
+      // 1vs1·2vs2는 1~3위도 함께 보여준다 (2026-09-05 사용자 지시) — 1페이지 상위 3행 + 슈챔컷 부근
+      final top3Rows = rtMode == 'manager'
+          ? <Map<String, dynamic>>[]
+          : page1Rows.where((r) {
+              final n = rankOf(r);
+              return n != null && n >= 1 && n <= 3;
+            }).toList();
+      final cutRows = rtMode == 'manager'
+          ? <Map<String, dynamic>>[]
           : superRows.where((r) {
               final n = rankOf(r);
               return n != null && n >= superCut - 19 && n <= superCut;
             }).toList();
+      final topRows = rtMode == 'manager' ? [...page1Rows, ...page2Rows] : [...top3Rows, ...cutRows];
+      final cutTitle = cutRows.isEmpty ? '슈챔컷 부근' : '슈챔컷 부근 (${cutRows.first['rank']}-${cutRows.last['rank']}위)';
       final data = <String, dynamic>{
         'top40': topRows,
         'top_title': rtMode == 'manager'
             ? 'TOP 40'
-            : (topRows.isEmpty ? '슈챔컷 부근' : '슈챔컷 부근 (${topRows.first['rank']}-${topRows.last['rank']}위)'),
-        'bottom': bottomList,
+            : (top3Rows.isEmpty ? cutTitle : 'TOP 3 · $cutTitle'),
+'bottom': bottomList,
         'date_info': dateInfo,
         'cutlines': {
           'super_champ_cut': {

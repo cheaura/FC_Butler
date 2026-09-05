@@ -718,7 +718,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
           Text(
             myForms
                 .map((f) =>
-                    '내 포메이션 ${f['formation']}: ${f['matches']}경기 (${((f['share'] as num) * 100).toStringAsFixed(0)}%)')
+                    '내 포메이션 ${_fmtFormation(f['formation'])}: ${f['matches']}경기 (${((f['share'] as num) * 100).toStringAsFixed(0)}%)')
                 .join(' · '),
             style: const TextStyle(fontSize: 12),
           ),
@@ -750,7 +750,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(t['formation'].toString(), style: const TextStyle(fontSize: 12)),
+                      child: Text(_fmtFormation(t['formation']), style: const TextStyle(fontSize: 12)),
                     ),
                     Text('${t['matches']}', style: const TextStyle(fontSize: 12)),
                     Text('${t['W']}/${t['D']}/${t['L']}', style: const TextStyle(fontSize: 12)),
@@ -765,3 +765,7 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
     );
   }
 }
+
+/// 5줄 포메이션(4-1-2-3-0)을 넥슨 표기(4-1-2-3)로 — 0인 줄 생략. 서버 캐시의 옛 형식 대비 표시 시점 정규화 (2026-09-05)
+String _fmtFormation(dynamic form) =>
+    form.toString().split('-').where((x) => x.isNotEmpty && x != '0').join('-');

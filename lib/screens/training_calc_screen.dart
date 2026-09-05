@@ -7,6 +7,7 @@ import '../services/error_reporter.dart';
 import '../services/ovr_formula.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/badges.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 집훈 계산기 (집중훈련 OVR 계산) — Panenka 1.0.4 (2026-08-22).
 ///
@@ -95,6 +96,7 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
   List<Map<String, dynamic>> _results = [];
   bool _searching = false;
   bool _showSearch = false;
+  List<Map<String, dynamic>> _recentCards = []; // 최근 선택 카드 (검색 기록, 2026-09-05)
 
   @override
   bool get wantKeepAlive => widget.asTab;
@@ -103,7 +105,10 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
   void initState() {
     super.initState();
     _showSearch = widget.asTab || widget.spid == null;
-    if (widget.spid != null) {
+    _TrainingRecentStore.load().then((list) {
+      if (mounted) setState(() => _recentCards = list);
+    });
+if (widget.spid != null) {
       _applyCard(
         spid: widget.spid!,
         name: widget.name ?? '',
@@ -374,10 +379,58 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
+          // 최근 선택 카드 — 검색 결과가 없을 때 칩으로 표시, 탭하면 바로 적용 (2026-09-05)
+          if (_results.isEmpty && _recentCards.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.history, size: 14, color: muted),
+              const SizedBox(width: 4),
+              Text('최근 선택', style: TextStyle(fontSize: 11.5, color: muted)),
+              const Spacer(),
+              InkWell(
+                onTap: () => _TrainingRecentStore.clear().then((_) {
+                  if (mounted) setState(() => _recentCards = []);
+                }),
+                child: Text('지우기', style: TextStyle(fontSize: 11, color: muted)),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _recentCards.map((r) {
+                final rspid = (r['spid'] is num) ? (r['spid'] as num).toInt() : int.tryParse('${r['spid']}') ?? 0;
+                return ActionChip(
+                  avatar: ClipOval(
+                    child: Image.network('${r['face_url'] ?? ''}',
+                        width: 20, height: 20,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 16)),
+                  ),
+                  label: Text('${r['name'] ?? ''}${(r['season'] ?? '').toString().isNotEmpty ? ' · ${r['season']}' : ''}',
+                      style: const TextStyle(fontSize: 12)),
+                  onPressed: () {
+                    _applyCard(
+                      spid: rspid,
+                      name: '${r['name'] ?? ''}',
+                      season: '${r['season'] ?? ''}',
+                      grade: 1,
+                      tc: 0,
+                      role: '${r['position'] ?? 'st'}',
+                      faceUrl: (r['face_url'] ?? '').toString().isEmpty ? null : r['face_url'].toString(),
+                    );
+                    _TrainingRecentStore.add(Map<String, dynamic>.from(r)).then((list) {
+                      if (mounted) setState(() => _recentCards = list);
+                    });
+                    if (!widget.asTab) setState(() => _showSearch = false);
+                  },
+                );
+              }).toList(),
+            ),
+          ],
           if (_results.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text('카드를 고르세요 (시즌 · 주포지션 · 기본 OVR)', style: TextStyle(fontSize: 11.5, color: muted)),
-            const SizedBox(height: 4),
+const SizedBox(height: 4),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 260),
               child: ListView.separated(
@@ -399,9 +452,19 @@ class _TrainingCalcScreenState extends State<TrainingCalcScreen> with AutomaticK
                         role: '${p['position'] ?? 'st'}',
                         faceUrl: p['face_url']?.toString(),
                       );
+                      // 최근 선택 카드에 기록 (검색 기록)
+                      _TrainingRecentStore.add({
+                        'spid': spid,
+                        'name': '${p['name'] ?? ''}',
+                        'season': '${p['season'] ?? ''}',
+                        'position': '${p['position'] ?? 'st'}',
+                        'face_url': p['face_url']?.toString() ?? '',
+                      }).then((list) {
+                        if (mounted) setState(() => _recentCards = list);
+                      });
                       if (!widget.asTab) setState(() => _showSearch = false);
                     },
-                    child: Container(
+child: Container(
                       color: selected ? Theme.of(context).colorScheme.primary.withOpacity(.12) : null,
                       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                       child: Row(
@@ -1043,4 +1106,43 @@ class _PickButton extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// 집훈 계산기 최근 선택 카드 저장소 (검색 기록) — SharedPreferences, 최대 10개, 같은 spid는 최신으로 교체. (2026-09-05)
+class _TrainingRecentStore {
+  static const _key = 'training_recent_cards_v1';
+  static const _max = 10;
+
+  static Future<List<Map<String, dynamic>>> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_key);
+      if (raw == null) return [];
+      return (json.decode(raw) as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e) {
+      print('[TrainingRecentStore] 로드 실패: $e');
+      return [];
+    }
+  }
+
+  static Future<void> _save(List<Map<String, dynamic>> list) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_key, json.encode(list));
+    } catch (e) {
+      print('[TrainingRecentStore] 저장 실패: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> add(Map<String, dynamic> card) async {
+    final list = await load();
+    list.removeWhere((r) => '${r['spid']}' == '${card['spid']}');
+    list.insert(0, card);
+    final trimmed = list.length > _max ? list.sublist(0, _max) : list;
+    await _save(trimmed);
+    return trimmed;
+  }
+
+  static Future<void> clear() => _save([]);
 }
