@@ -51,16 +51,33 @@ class PlayerMetaStore {
         .toList();
   }
 
-  /// 시세 문자열(강화별 '|' 구분). 30분 지났으면 null.
+  /// 시세 문자열(강화별 '|' 구분). 마지막으로 받은 값을 그대로 돌려준다 (만료 여부는 [priceAt]/[priceStale]로 판단).
+  /// 2026-09-07: 30분 지난 값을 버리던 규칙 폐지 — 넥슨 재조회 실패 시 총액이 0으로 무너지지 않도록 마지막 값 유지.
   static String? cachedPrice(num? spid) {
     final m = cached(spid);
     if (m == null) return null;
-    final atMs = m['_price_at'];
-    if (atMs is! int) return null;
-    final at = DateTime.fromMillisecondsSinceEpoch(atMs);
-    if (DateTime.now().difference(at) > _priceMaxAge) return null;
     final p = m['each_price']?.toString() ?? '';
     return p.isEmpty ? null : p;
+  }
+
+  /// 시세를 받은 시각 (서버 price_at 우선). 시세가 없으면 null.
+  static DateTime? priceAt(num? spid) {
+    final m = cached(spid);
+    final ms = m?['_price_at'];
+    if (m == null || ms is! int || (m['each_price']?.toString() ?? '').isEmpty) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  /// 시세가 30분을 넘었으면 true (없어도 true).
+  static bool priceStale(num? spid) {
+    final at = priceAt(spid);
+    return at == null || DateTime.now().difference(at) > _priceMaxAge;
+  }
+
+  /// 서버 응답의 시세 시각(epoch 초) → ms. 없으면 지금.
+  static int _priceAtMsOf(Map<String, dynamic> m, DateTime now) {
+    final pa = m['price_at'];
+    return pa is num ? (pa * 1000).toInt() : now.millisecondsSinceEpoch;
   }
 
   static bool _complete(Map<String, dynamic> m) => (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List;
@@ -76,11 +93,13 @@ class PlayerMetaStore {
     for (final id in ids) {
       final m = _mem[id];
       final at = _memAt[id];
+      // 시세 신선도는 '메타 받은 시각'이 아니라 '시세 받은 시각'(_price_at) 기준 (2026-09-07 수정):
+      // user-squad 동봉 메타를 흡수하면 메타 시각은 방금인데 시세는 없거나 오래돼 재요청이 건너뛰어지던 결함.
       final stale = m == null ||
           at == null ||
           now.difference(at) > _maxAge ||
           !_complete(m) ||
-          (freshPrice && now.difference(at) > _priceMaxAge);
+          (freshPrice && priceStale(id));
       if (stale) need.add(id);
     }
     if (need.isEmpty) return;
@@ -174,13 +193,14 @@ class PlayerMetaStore {
         final m = Map<String, dynamic>.from(v);
         final spid = int.tryParse('$k');
         if (spid == null || (m['each_ovr']?.toString() ?? '').isEmpty) return;
-        // 기존에 시세가 있었고 이번 응답에 없으면(30분 초과) 과거 시세 유지 — 시각은 갱신하지 않음
+        // 기존에 시세가 있었고 이번 응답에 없으면 과거 시세 유지 — 시각은 갱신하지 않음
         final prev = _mem[spid];
-        if (m['each_price'] == null && prev?['each_price'] != null) {
+        if ((m['each_price']?.toString() ?? '').isEmpty && prev?['each_price'] != null) {
           m['each_price'] = prev!['each_price'];
           m['_price_at'] = prev['_price_at'] ?? _memAt[spid]?.millisecondsSinceEpoch;
-        } else if (m['each_price'] != null) {
-          m['_price_at'] = now.millisecondsSinceEpoch;
+        } else if ((m['each_price']?.toString() ?? '').isNotEmpty) {
+          // 서버가 만료 시세(price_stale)를 기준 시각(price_at)과 함께 내려주면 그 시각을 그대로 기록
+          m['_price_at'] = _priceAtMsOf(m, now);
         }
         _mem[spid] = m;
         _memAt[spid] = now;
@@ -212,7 +232,7 @@ class PlayerMetaStore {
         'pay': p['pay'],
         'each_ovr': p['each_ovr'],
         if (p['each_price'] != null) 'each_price': p['each_price'],
-        if (p['each_price'] != null) '_price_at': now.millisecondsSinceEpoch,
+        if (p['each_price'] != null) '_price_at': _priceAtMsOf(p, now),
         'season_img': p['season_img'],
         'face_url': p['face_url'],
         'position': p['position'],

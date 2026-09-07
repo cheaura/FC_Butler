@@ -721,9 +721,59 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   /// 배치된 슬롯들의 급여·eachOvr·시세·특성 확보 (묶음 1회) 후 팀컬러 계산
   Future<void> _enrichSlots() async {
-    await _ensureFieldsAll(_filled.map((s) => (s.player!['spid'] as num).toInt()));
+    setState(() => _pricesLoading = true);
+    try {
+      await _ensureFieldsAll(_filled.map((s) => (s.player!['spid'] as num).toInt()));
+    } finally {
+      if (mounted) setState(() => _pricesLoading = false);
+    }
     _scheduleCalc();
   }
+
+  // ── 시세 미확보·만료 표시와 재시도 (2026-09-07, 4안) ──
+  bool _pricesLoading = false;
+
+  /// 시세 없는 슬롯 spid 목록
+  List<int> get _priceMissingSpids => [
+        for (final s in _filled)
+          if (_priceAt(s.player!, s.grade) == 0) (s.player!['spid'] as num).toInt()
+      ];
+
+  /// 배치 선수 시세 중 가장 오래된 기준 시각 (30분 넘은 것이 있으면 그 시각, 없으면 null)
+  DateTime? get _oldestStalePriceAt {
+    DateTime? oldest;
+    for (final s in _filled) {
+      final spid = s.player!['spid'] as num?;
+      if (!PlayerMetaStore.priceStale(spid)) continue;
+      final at = PlayerMetaStore.priceAt(spid);
+      if (at == null) continue;
+      if (oldest == null || at.isBefore(oldest)) oldest = at;
+    }
+    return oldest;
+  }
+
+  /// 시세 미확보 선수만 다시 요청 (spid 묶음이 달라 서버 5분 캐시를 비켜간다)
+  Future<void> _retryPrices() async {
+    final ids = _priceMissingSpids;
+    if (ids.isEmpty || _pricesLoading) return;
+    setState(() => _pricesLoading = true);
+    try {
+      await _ensureFieldsAll(ids);
+    } finally {
+      if (mounted) setState(() => _pricesLoading = false);
+    }
+    final still = _priceMissingSpids.length;
+    if (mounted && still > 0) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+            content: Text('$still명은 넥슨에서 시세를 받지 못했습니다. 잠시 후 다시 시도해주세요.'),
+            duration: const Duration(seconds: 2)));
+    }
+  }
+
+  static String _hhmm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   // ── 유저 스쿼드 불러오기 → 커스텀 (웹 loadUserSquad 이식) ──
   Future<void> _loadUserSquad(String name, String mode) async {
@@ -2375,22 +2425,43 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       }
       totalPrice += _priceAt(s.player!, s.grade);
     }
+    // 시세 상태 보조 줄: 계산 중 / 미확보 N명(다시 시도) / 기준 시각(30분 초과)
+    final missing = _priceMissingSpids.length;
+    final stale = _oldestStalePriceAt;
+    Widget? priceSub;
+    if (_filled.isNotEmpty) {
+      if (_pricesLoading) {
+        priceSub = Text('시세 확인 중…', style: TextStyle(fontSize: 10, color: _subColor));
+      } else if (missing > 0) {
+        priceSub = InkWell(
+          onTap: _retryPrices,
+          child: Text('시세 미확보 $missing명 · 다시 시도',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _accent)),
+        );
+      } else if (stale != null) {
+        priceSub = Text('기준 ${_hhmm(stale)} (넥슨 재조회 실패로 마지막 시세)',
+            style: TextStyle(fontSize: 10, color: _subColor));
+      }
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: _totalCell('총 급여', payKnown == 0 ? '-' : '$totalPay / $_payLimit',
                 color: totalPay > _payLimit ? _rose : null),
           ),
           const SizedBox(width: 8),
-          Expanded(child: _totalCell('총 구단가치', totalPrice == 0 ? '-' : formatBp(totalPrice))),
+          Expanded(
+              child: _totalCell('총 구단가치', totalPrice == 0 ? (_pricesLoading ? '계산 중…' : '-') : formatBp(totalPrice),
+                  sub: priceSub)),
         ],
       ),
     );
   }
 
-  Widget _totalCell(String label, String value, {Color? color}) {
+  Widget _totalCell(String label, String value, {Color? color, Widget? sub}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -2403,6 +2474,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         children: [
           Text(label, style: TextStyle(fontSize: 10, color: _subColor)),
           Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
+          if (sub != null) sub,
         ],
       ),
     );

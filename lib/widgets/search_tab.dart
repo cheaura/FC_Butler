@@ -1058,20 +1058,40 @@ class _SearchTabState extends State<SearchTab>
   }
 
   /// 선발 11명의 시세 확보(묶음 1회) → 총 구단가치 표시 (2026-09-07 사용자 요청)
-  Future<void> _ensureSquadMeta(Map<String, dynamic> squad) async {
-    final spids = (squad['players'] as List? ?? [])
-        .whereType<Map>()
-        .map((p) => p['spid'] as num?)
-        .whereType<num>()
-        .toList();
+  bool _squadPricesLoading = false;
+
+  Future<void> _ensureSquadMeta(Map<String, dynamic> squad, {List<num>? only}) async {
+    final spids = only ??
+        (squad['players'] as List? ?? []).whereType<Map>().map((p) => p['spid'] as num?).whereType<num>().toList();
     if (spids.isEmpty) return;
+    if (mounted) setState(() => _squadPricesLoading = true);
     try {
       await PlayerMetaStore.ensureAll(spids, freshPrice: true);
     } catch (e) {
       print('[SearchTab] 스쿼드 시세 확보 실패: $e');
     }
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _squadPricesLoading = false);
   }
+
+  /// 시세 미확보 선수만 다시 요청 (4안)
+  Future<void> _retrySquadPrices(List<Map<String, dynamic>> players) async {
+    final s = _squad;
+    if (s == null || _squadPricesLoading) return;
+    final missing = [for (final p in players) if (_squadPriceAt(p) == 0) p['spid'] as num];
+    if (missing.isEmpty) return;
+    await _ensureSquadMeta(s, only: missing);
+    final still = players.where((p) => _squadPriceAt(p) == 0).length;
+    if (mounted && still > 0) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+            content: Text('$still명은 넥슨에서 시세를 받지 못했습니다. 잠시 후 다시 시도해주세요.'),
+            duration: const Duration(seconds: 2)));
+    }
+  }
+
+  static String _hhmm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   /// 슬롯 포지션 기준 OVR = eachOvr[포지션] + 강화 보너스 + 적응도 Lv.5 (스쿼드 탭과 같은 식, 팀컬러 미반영)
   static int? _squadOvr(Map<String, dynamic> p) {
@@ -1097,7 +1117,7 @@ class _SearchTabState extends State<SearchTab>
     return digits.isEmpty ? 0 : (int.tryParse(digits) ?? 0);
   }
 
-  Widget _squadTotalCell(String label, String value) {
+  Widget _squadTotalCell(String label, String value, {Widget? sub}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -1110,6 +1130,7 @@ class _SearchTabState extends State<SearchTab>
         children: [
           Text(label, style: TextStyle(fontSize: 10, color: _subColor)),
           Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          if (sub != null) sub,
         ],
       ),
     );
@@ -1170,18 +1191,39 @@ class _SearchTabState extends State<SearchTab>
             priceKnown++;
           }
         }
+        // 시세 상태 보조 줄: 확인 중 / 미확보 N명(다시 시도) / 기준 시각(30분 초과)
+        final missing = players.length - priceKnown;
+        DateTime? stale;
+        for (final p in players) {
+          final spid = p['spid'] as num?;
+          if (!PlayerMetaStore.priceStale(spid)) continue;
+          final at = PlayerMetaStore.priceAt(spid);
+          if (at != null && (stale == null || at.isBefore(stale))) stale = at;
+        }
+        Widget? sub;
+        if (_squadPricesLoading) {
+          sub = Text('시세 확인 중…', style: TextStyle(fontSize: 10, color: _subColor));
+        } else if (missing > 0) {
+          sub = InkWell(
+            onTap: () => _retrySquadPrices(players),
+            child: Text('시세 미확보 $missing명 · 다시 시도',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: _accent)),
+          );
+        } else if (stale != null) {
+          sub = Text('기준 ${_hhmm(stale)} (넥슨 재조회 실패로 마지막 시세)',
+              style: TextStyle(fontSize: 10, color: _subColor));
+        }
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(child: _squadTotalCell('총 급여', payKnown == 0 ? '-' : '$totalPay')),
               const SizedBox(width: 8),
               Expanded(
-                  child: _squadTotalCell(
-                      '총 구단가치',
-                      priceKnown == 0
-                          ? '계산 중…'
-                          : formatBp(totalPrice) + (priceKnown < players.length ? ' (일부)' : ''))),
+                  child: _squadTotalCell('총 구단가치',
+                      priceKnown == 0 ? (_squadPricesLoading ? '계산 중…' : '-') : formatBp(totalPrice),
+                      sub: sub)),
             ],
           ),
         );
