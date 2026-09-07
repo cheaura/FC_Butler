@@ -7,6 +7,7 @@ import '../services/error_reporter.dart';
 import '../services/ovr_formula.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/badges.dart';
+import '../widgets/face_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 집훈 계산기 (집중훈련 OVR 계산) — Panenka 1.0.4 (2026-08-22).
@@ -599,8 +600,13 @@ child: Container(
                       padding: const EdgeInsets.only(right: 10),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(_faceUrl!,
-                            width: 44, height: 44, errorBuilder: (_, __, ___) => const SizedBox(width: 44, height: 44)),
+                        // 서버 주소 실패 시 spid·pid 대체 주소 순차 시도 (2026-09-07)
+                        child: FaceImage(
+                            url: _faceUrl,
+                            spid: _spid,
+                            width: 44,
+                            height: 44,
+                            fallback: const SizedBox(width: 44, height: 44)),
                       ),
                     ),
                   Expanded(

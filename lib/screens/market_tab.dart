@@ -2,6 +2,7 @@
 // 서버 API는 웹과 동일: /api/user/nexon-key*, /api/user/market/*
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/badges.dart';
 
 class MarketTab extends StatefulWidget {
   final String username;
@@ -408,7 +409,7 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
     final dt = (it['tradeDate']?.toString() ?? '').replaceFirst('T', ' ');
     final dtShort = dt.length >= 16 ? dt.substring(0, 16) : dt;
     final isSell = it['tradeType'] == 'sell';
-    final grade = it['grade'] != null ? '${it['grade']}강' : '';
+    final grade = (it['grade'] as num?)?.toInt(); // 강화 배지 (웹 동일 규격, 2026-09-07)
     Widget? profitWidget;
     if (it['profit'] != null) {
       final type = it['profitType']?.toString();
@@ -440,8 +441,19 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${it['season'] ?? ''} ${it['playerName'] ?? '-'} $grade'.trim(),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text('${it['season'] ?? ''} ${it['playerName'] ?? '-'}'.trim(),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      ),
+                      if (grade != null) ...[
+                        const SizedBox(width: 6),
+                        GradeBadge(grade: grade, size: 17),
+                      ],
+                    ],
+                  ),
                   Text(dtShort, style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor)),
                 ],
               ),
@@ -521,8 +533,18 @@ class _MarketTabState extends State<MarketTab> with AutomaticKeepAliveClientMixi
           return ListTile(
             dense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-            title: Text('${it['season'] ?? ''} ${it['playerName'] ?? '-'} ${it['grade'] != null ? '${it['grade']}강' : ''}'.trim(),
-                style: const TextStyle(fontSize: 13)),
+            title: Row(
+              children: [
+                Flexible(
+                  child: Text('${it['season'] ?? ''} ${it['playerName'] ?? '-'}'.trim(),
+                      overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                ),
+                if (it['grade'] != null) ...[
+                  const SizedBox(width: 6),
+                  GradeBadge(grade: (it['grade'] as num).toInt(), size: 17),
+                ],
+              ],
+            ),
             subtitle: Text('구매 ${it['buyDisplay'] ?? '-'} → 현재 ${it['currentDisplay'] ?? '-'}',
                 style: const TextStyle(fontSize: 11)),
             trailing: it['profit'] != null

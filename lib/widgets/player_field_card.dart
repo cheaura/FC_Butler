@@ -4,6 +4,7 @@ import '../constants/positions.dart';
 import '../services/trait_store.dart';
 import '../services/player_meta_store.dart';
 import 'badges.dart';
+import 'face_image.dart';
 
 /// 필드 선수 카드 — 3화면(스쿼드 탭·검색 스쿼드 세그·경기 상세) 공용.
 ///
@@ -165,13 +166,13 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
                     child: widget.empty
                         ? const Icon(Icons.add,
                             color: Colors.white54, size: 20)
-                        : Image.network(
-                            widget.faceUrl ?? '',
+                        // 서버 주소 실패 시 spid·pid 대체 주소 순차 시도 (2026-09-07)
+                        : FaceImage(
+                            url: widget.faceUrl,
+                            spid: widget.spid,
                             fit: BoxFit.cover,
-                            errorBuilder: (c, e, s) => const Icon(
-                                Icons.person,
-                                color: Colors.white70,
-                                size: 18),
+                            fallback: const Icon(Icons.person,
+                                color: Colors.white70, size: 18),
                           ),
                   ),
                 ),
@@ -257,7 +258,7 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
                     bottom: -4,
                     right: -7,
                     child:
-                        GradeBadge(grade: widget.grade!, fontSize: 7.5),
+                        GradeBadge(grade: widget.grade!, size: 13),
                   ),
                 // 하단 중앙: 팀컬러 개수 (1.0.4)
                 if (tcCount > 0)

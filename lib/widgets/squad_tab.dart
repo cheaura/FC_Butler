@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -17,6 +18,7 @@ import '../services/ovr_formula.dart';
 import '../utils/fc_format.dart';
 import 'badges.dart';
 import 'pill_tabs.dart';
+import 'pitch_field.dart';
 import 'player_field_card.dart';
 import '../screens/training_calc_screen.dart';
 
@@ -361,12 +363,18 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   int? _slotOvr(_Slot slot) {
     final p = slot.player;
     if (p == null) return null;
+    final v = _ovrAt(p, slot.grade, slot.spPos);
+    if (v != null) return v;
+    final calcOvr = (_tcCalc?['ovr_by_spid'] as Map?)?['${p['spid']}'];
+    return calcOvr is num ? calcOvr.toInt() : null;
+  }
+
+  /// 선수를 특정 포지션(spPos)에 놓았을 때의 OVR — 스왑 드래그 미리보기·슬롯 OVR 공용 (2026-09-07 분리).
+  /// eachOvr 미확보면 null.
+  int? _ovrAt(Map<String, dynamic> p, int grade, int spPos) {
     final spid = (p['spid'] as num).toInt();
-    final base = _eachOvrAt(p, slot.spPos);
-    if (base == 0) {
-      final calcOvr = (_tcCalc?['ovr_by_spid'] as Map?)?['$spid'];
-      return calcOvr is num ? calcOvr.toInt() : null;
-    }
+    final base = _eachOvrAt(p, spPos);
+    if (base == 0) return null;
     // 소속/강화 보너스 + 배정된 특성 팀컬러의 '전체 능력치' (서버 tc_base_bonus_by_spid가 없으면 구 tc_bonus_by_spid)
     final baseMap = _tcCalc?['tc_base_bonus_by_spid'] as Map?;
     num tcBonus;
@@ -377,7 +385,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     } else {
       tcBonus = ((_tcCalc?['tc_bonus_by_spid'] as Map?)?['$spid'] as num?) ?? 0;
     }
-    return base + (kGradeBonus[slot.grade] ?? 0) + (kAdapBonus[_adap] ?? 0) + tcBonus.toInt();
+    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[_adap] ?? 0) + tcBonus.toInt();
   }
 
   /// 슬롯 선수의 팀컬러 '전체 능력치' 합 (소속/강화 + 배정된 특성) — 집훈 계산기 진입용
@@ -699,7 +707,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         _base = (data['base'] as num? ?? 0).toInt();
         _snapDate = data['snap_date'] ?? '';
         _customLabel = '랭커 포메이션'
-            '${_formationCond.isNotEmpty ? ' ($_formationCond)' : ''}';
+            '${_formationCond.isNotEmpty ? ' (${fmtFormation(_formationCond)})' : ''}';
         if (_formationCond.isNotEmpty) _formation = _formationCond;
         _tcCalc = null;
       });
@@ -743,7 +751,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           return _Slot(kSpposRole[sp] ?? 'st', sp, grade: (p['grade'] as num? ?? 1).toInt());
         }).toList();
         _formation = d['formation5']?.toString() ?? '4-1-2-3';
-        _customLabel = '$name의 스쿼드 ($_formation)';
+        _customLabel = '$name의 스쿼드 (${fmtFormation(_formation)})';
         _tcCalc = null;
       });
       // B안: 서버가 동봉한 메타(pay·each_ovr·특성)를 바로 사용 — 11회 검색 제거
@@ -845,6 +853,394 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     } else {
       _openEditSheet(idx);
     }
+  }
+
+  // ── 선수 자리 바꾸기 — 길게 눌러 끌기 (넥슨 스쿼드메이커 규칙 이식, 2026-09-07) ──
+  // 규칙(넥슨 번들 실측): GK 카드는 잠금(끌 수 없고 그 자리에 놓을 수도 없음), 선수가 있는 자리에 놓으면 두 선수 교체,
+  // 빈 자리에 놓으면 이동. 포지션은 자리 것을 따르고 OVR은 그 포지션 기준으로 재계산.
+  int? _dragFrom; // 끌고 있는 슬롯 (놓을 수 있는 자리 강조용)
+
+  bool _isGkSlot(int idx) => _slots[idx].role == 'gk';
+
+  void _swapSlots(int from, int to) {
+    if (from == to || from < 0 || to < 0 || from >= _slots.length || to >= _slots.length) return;
+    if (_isGkSlot(from) || _isGkSlot(to)) return;
+    final a = _slots[from];
+    final b = _slots[to];
+    if (a.player == null) return;
+    setState(() {
+      final movedPlayer = a.player;
+      final movedGrade = a.grade;
+      a.player = b.player;
+      a.grade = b.player == null ? 1 : b.grade;
+      b.player = movedPlayer;
+      b.grade = movedGrade;
+      _tcCalc = null;
+      _dragFrom = null;
+    });
+    HapticFeedback.mediumImpact();
+    _scheduleCalc();
+    final moved = _shortName(b.player!['name']?.toString());
+    final other = a.player == null ? null : _shortName(a.player!['name']?.toString());
+    final msg = other != null
+        ? '$moved와 $other 위치 교체'
+        : '$moved 위치 이동 (${a.role.toUpperCase()} → ${b.role.toUpperCase()})';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(milliseconds: 1400)));
+  }
+
+  /// 필드 슬롯 = 드롭 대상 + (선수가 있고 GK가 아니면) 길게 눌러 끌기 원본
+  Widget _draggableSlot(int idx, double cardW) {
+    final slot = _slots[idx];
+    final locked = _isGkSlot(idx);
+    final card = _slotCard(idx, cardW);
+    final target = DragTarget<int>(
+      onWillAcceptWithDetails: (d) => d.data != idx && !locked && !_isGkSlot(d.data),
+      onAcceptWithDetails: (d) => _swapSlots(d.data, idx),
+      builder: (ctx, candidates, rejected) {
+        final from = candidates.isNotEmpty ? candidates.first : null;
+        final hovering = from != null;
+        final droppable = _dragFrom != null && _dragFrom != idx && !locked;
+        String? preview;
+        if (hovering) {
+          // 넥슨식 전후 미리보기: 끌고 온 선수가 이 자리에서 갖는 OVR
+          final fs = _slots[from];
+          final fp = fs.player;
+          if (fp != null) {
+            final before = _slotOvr(fs);
+            final after = _ovrAt(fp, fs.grade, slot.spPos);
+            preview = '${fs.role.toUpperCase()} ${before ?? '-'} → ${slot.role.toUpperCase()} ${after ?? '-'}';
+          }
+        }
+        return AnimatedScale(
+          scale: hovering ? 1.08 : 1.0,
+          duration: const Duration(milliseconds: 120),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                decoration: hovering
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [BoxShadow(color: _accent.withOpacity(.9), blurRadius: 14, spreadRadius: 1)])
+                    : (droppable
+                        ? BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: const [BoxShadow(color: Color(0x66FFFFFF), blurRadius: 8)])
+                        : null),
+                child: card,
+              ),
+              if (preview != null)
+                Positioned(
+                  top: -18,
+                  left: -30,
+                  right: -30,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xE6141026),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: _accent.withOpacity(.8)),
+                      ),
+                      child: Text(preview,
+                          maxLines: 1,
+                          style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.white)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (slot.player == null || locked) return target; // 빈 자리·GK는 끌 수 없음
+    return LongPressDraggable<int>(
+      data: idx,
+      delay: const Duration(milliseconds: 250),
+      hapticFeedbackOnStart: true,
+      onDragStarted: () => setState(() => _dragFrom = idx),
+      onDragEnd: (_) => setState(() => _dragFrom = null),
+      onDraggableCanceled: (_, __) => setState(() => _dragFrom = null),
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(
+          opacity: .92,
+          child: Transform.scale(scale: 1.1, child: SizedBox(width: cardW, child: _slotCard(idx, cardW))),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: .35, child: target),
+      child: target,
+    );
+  }
+
+  // ── 팀컬러 멤버 추천 (웹 squad.js computeTcReco/tcRecoPanel 이식 — B안, 2026-09-07) ──
+  // 규칙(08-30 확정): 제외·중복은 pid(인물) 기준, 인물별 대표 카드 1장, 그 자리 0강 eachOvr 상위 3,
+  // 미발동=비후보 슬롯만 / 발동=전체 슬롯, 손해 자리는 접기, 누르면 즉시 배치(슬롯 강화 유지).
+  final Map<int, Map<String, dynamic>> _tcMembersCache = {}; // tc_id → {members, tc}
+
+  static int _pidOf(Map<String, dynamic> p) {
+    final pid = p['pid'];
+    if (pid is num && pid > 0) return pid.toInt();
+    return ((p['spid'] as num?)?.toInt() ?? 0) % 1000000;
+  }
+
+  Future<Map<String, dynamic>> _loadTcMembers(int tid) async {
+    final hit = _tcMembersCache[tid];
+    if (hit != null) return hit;
+    final r = await http
+        .get(Uri.parse('${ApiService.baseUrl}/api/user/squad/tc-members?tc_id=$tid'))
+        .timeout(const Duration(seconds: 25));
+    final d = json.decode(r.body);
+    if (d['success'] != true) throw Exception(d['message'] ?? '멤버 조회에 실패했습니다.');
+    final res = <String, dynamic>{
+      'members': (d['members'] as List? ?? []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList(),
+      'tc': Map<String, dynamic>.from(d['tc'] as Map? ?? {}),
+    };
+    _tcMembersCache[tid] = res;
+    return res;
+  }
+
+  Map<String, List<_TcRecoEntry>> _computeTcReco(
+      Map<String, dynamic> f, List<Map<String, dynamic>> members, bool isActive) {
+    final candSet = (f['candidates'] as List? ?? []).map((c) => '$c').toSet();
+    final squadPids = _filled.map((s) => _pidOf(s.player!)).toSet();
+    final empty = <_TcRecoEntry>[];
+    final gain = <_TcRecoEntry>[];
+    final loss = <_TcRecoEntry>[];
+    for (var idx = 0; idx < _slots.length; idx++) {
+      final slot = _slots[idx];
+      final p = slot.player;
+      if (p != null && !isActive && candSet.contains('${p['spid']}')) continue;
+      final cur = p == null ? 0 : _eachOvrAt(p, slot.spPos);
+      final byPid = <int, _TcRecoPick>{};
+      for (final m in members) {
+        final pid = _pidOf(m);
+        if (squadPids.contains(pid)) continue;
+        final o = _eachOvrAt({'eachOvr': m['each_ovr']}, slot.spPos);
+        if (o <= 0) continue;
+        final prev = byPid[pid];
+        if (prev == null || o > prev.ovr) byPid[pid] = _TcRecoPick(m, o);
+      }
+      if (byPid.isEmpty) continue;
+      final recs = byPid.values.toList()..sort((a, b) => b.ovr - a.ovr);
+      final top = recs.take(3).toList();
+      final e = _TcRecoEntry(idx: idx, slot: slot, cur: cur, recs: top, best: top.first.ovr - cur);
+      if (p == null) {
+        empty.add(e);
+      } else if (e.best > 0) {
+        gain.add(e);
+      } else {
+        loss.add(e);
+      }
+    }
+    gain.sort((a, b) => b.best - a.best);
+    loss.sort((a, b) => b.best - a.best);
+    return {'empty': empty, 'gain': gain, 'loss': loss};
+  }
+
+  /// 추천 멤버 배치 — 서버 메타(each_ovr…)를 슬롯 선수 형식(eachOvr…)으로 옮겨 기존 _placePlayer 재사용 (슬롯 강화 유지)
+  bool _placeRecoMember(int idx, Map<String, dynamic> m) {
+    final player = <String, dynamic>{
+      'spid': m['spid'],
+      'pid': m['pid'],
+      'name': m['name'],
+      'pay': m['pay'],
+      'eachOvr': m['each_ovr'],
+      'face_url': m['face_url'],
+      'season': m['season_img'],
+      'seasonImgBig': m['season_img_big'],
+      'position': m['position'],
+      if (m['each_price'] != null && '${m['each_price']}'.isNotEmpty) 'eachPrice': m['each_price'],
+    };
+    return _placePlayer(idx, player, _slots[idx].grade);
+  }
+
+  Future<void> _openTcRecoSheet(Map<String, dynamic> f, {required bool isActive}) async {
+    final tid = (f['tc_id'] as num).toInt();
+    final future = _loadTcMembers(tid);
+    final good = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        maxChildSize: 0.95,
+        builder: (ctx, controller) => FutureBuilder<Map<String, dynamic>>(
+          future: future,
+          builder: (ctx, snap) {
+            final cands = (f['candidates'] as List? ?? []).length;
+            final data = snap.data;
+            final threshold = (f['threshold'] as num?)?.toInt() ?? (data?['tc']?['threshold'] as num?)?.toInt() ?? 8;
+            final lack = threshold - cands;
+            final effList = ((f['effects'] as List?) ?? (data?['tc']?['effects'] as List?) ?? [])
+                .whereType<Map>()
+                .map((e) => '${e['stat']} +${e['value']}')
+                .join(' · ');
+            final children = <Widget>[
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('${f['name']}',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _accent)),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: (isActive || lack <= 0 ? good : _rose).withOpacity(.16),
+                        borderRadius: BorderRadius.circular(999)),
+                    child: Text(
+                        isActive || lack <= 0 ? '발동 · 후보 $cands/$threshold' : '후보 $cands/$threshold — $lack명 부족',
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: isActive || lack <= 0 ? good : _rose)),
+                  ),
+                ],
+              ),
+              if (effList.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(effList, style: TextStyle(fontSize: 11.5, color: _subColor)),
+                ),
+              const SizedBox(height: 10),
+            ];
+            if (snap.hasError) {
+              children.add(Text('멤버를 불러오지 못했습니다. ${snap.error}', style: TextStyle(fontSize: 12, color: _rose)));
+            } else if (data == null) {
+              children.add(const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 30), child: Center(child: CircularProgressIndicator())));
+            } else {
+              final members = (data['members'] as List).cast<Map<String, dynamic>>();
+              final r = _computeTcReco(f, members, isActive);
+              final empty = r['empty']!;
+              final gain = r['gain']!;
+              final loss = r['loss']!;
+              if (empty.isEmpty && gain.isEmpty && loss.isEmpty) {
+                children.add(Text('추천할 수 있는 멤버 데이터가 없습니다.', style: TextStyle(fontSize: 12, color: _subColor)));
+              } else {
+                if (empty.isNotEmpty || gain.isNotEmpty) {
+                  children.add(Text('같은 선수는 한 자리에만 배치됩니다. 선수를 누르면 그 자리에 바로 배치돼요.',
+                      style: TextStyle(fontSize: 11, color: _subColor)));
+                  children.add(const SizedBox(height: 6));
+                  for (final e in [...empty, ...gain]) {
+                    children.add(_tcRecoSlotRow(ctx, e, good));
+                  }
+                } else {
+                  children.add(Text('교체해서 OVR 이득을 보는 자리가 없습니다. 아래 손해 자리에서 고르거나 조건을 바꿔보세요.',
+                      style: TextStyle(fontSize: 11, color: _subColor)));
+                }
+                if (loss.isNotEmpty) {
+                  children.add(Theme(
+                    data: Theme.of(ctx).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: EdgeInsets.zero,
+                      dense: true,
+                      title: Text('손해 자리 ${loss.length}개 보기 (교체 시 OVR 하락)',
+                          style: TextStyle(fontSize: 11.5, color: _subColor)),
+                      children: [for (final e in loss) _tcRecoSlotRow(ctx, e, good)],
+                    ),
+                  ));
+                }
+              }
+            }
+            return ListView(
+              controller: controller,
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+              children: children,
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// 추천 시트의 슬롯 한 줄: 포지션 배지 · 현재 선수/OVR · 최대 증감 · 추천 3명(누르면 배치)
+  Widget _tcRecoSlotRow(BuildContext sheetCtx, _TcRecoEntry e, Color good) {
+    final slot = e.slot;
+    final cur = slot.player;
+    final chips = <Widget>[];
+    for (final r in e.recs) {
+      final m = r.m;
+      final d = r.ovr - e.cur;
+      chips.add(InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          if (_placeRecoMember(e.idx, m)) {
+            Navigator.of(sheetCtx).pop();
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(
+                  content: Text('${_shortName('${m['name']}')} → ${slot.role.toUpperCase()} 배치'),
+                  duration: const Duration(milliseconds: 1400)));
+          }
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            border: Border.all(color: _subColor.withOpacity(.45)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SeasonBadge(spid: m['spid'] as num?, height: 12, fallbackText: '${m['season_img'] ?? ''}'),
+              const SizedBox(width: 5),
+              Text(_shortName('${m['name'] ?? m['spid']}'),
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+              const SizedBox(width: 5),
+              Text('${r.ovr}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+              if (cur != null) ...[
+                const SizedBox(width: 3),
+                Text(d > 0 ? '+$d' : '$d',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: d > 0 ? good : _rose)),
+              ],
+              if (m['pay'] != null) ...[
+                const SizedBox(width: 5),
+                Text('급여 ${m['pay']}', style: TextStyle(fontSize: 10, color: _subColor)),
+              ],
+            ],
+          ),
+        ),
+      ));
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(color: posColor(slot.spPos), borderRadius: BorderRadius.circular(4)),
+                child: Text(slot.role.toUpperCase(),
+                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Colors.white)),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: cur == null
+                    ? Text('빈 자리', style: TextStyle(fontSize: 12, color: _subColor))
+                    : Text('${_shortName(cur['name']?.toString())}  OVR ${e.cur}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+              Text(
+                cur == null ? '채우기' : (e.best > 0 ? '최대 +${e.best}' : '최대 ${e.best}'),
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w800, color: cur == null || e.best > 0 ? good : _rose),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Wrap(spacing: 6, runSpacing: 6, children: chips),
+        ],
+      ),
+    );
   }
 
   /// 랭커픽 후보 (정확 포지션 → 같은 계열 폴백, 웹 picksForSlot 이식)
@@ -1056,7 +1452,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                       ],
                                     ),
                                     isThreeLine: _tcMatches(p['spid'] as num?) != null,
-                                    trailing: GradeBadge(grade: (p['grade'] as num? ?? 1).toInt(), fontSize: 12),
+                                    trailing: GradeBadge(grade: (p['grade'] as num? ?? 1).toInt(), size: 20),
                                     onTap: dup
                                         ? null
                                         : () {
@@ -1683,7 +2079,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   const DropdownMenuItem(value: '', child: Text('전체 포메이션')),
                   ...fms.map((f) => DropdownMenuItem(
                         value: f['name'] as String,
-                        child: Text('${f['name']} (${f['pct']}%)', overflow: TextOverflow.ellipsis),
+                        // 값은 서버 키(5줄 원형) 유지, 글자만 넥슨 표기
+                        child: Text('${fmtFormation(f['name'])} (${f['pct']}%)', overflow: TextOverflow.ellipsis),
                       )),
                 ],
                 onChanged: (v) => setState(() => _formationCond = v ?? ''),
@@ -1847,6 +2244,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: good)),
                           ),
                           Text('선택 ${sel.length}명', style: TextStyle(fontSize: 10, color: _subColor)),
+                          _toolChip('교체 추천', () => _openTcRecoSheet(f, isActive: true)),
                         ],
                       ),
                       if (effects.isNotEmpty) Text(effects, style: TextStyle(fontSize: 11, color: _subColor)),
@@ -1900,17 +2298,46 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               dense: true,
-              title: Text('미발동 특성 팀컬러 ${inactive.length}개 (후보 부족)', style: TextStyle(fontSize: 11.5, color: _subColor)),
+              title: Text('미발동 특성 팀컬러 ${inactive.length}개 (후보 부족) — 누르면 부족 인원 추천',
+                  style: TextStyle(fontSize: 11.5, color: _subColor)),
               children: [
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 4,
-                  children: [
-                    for (final f in inactive)
-                      Text('${f['name']} ${(f['candidates'] as List? ?? []).length}/${f['threshold']}',
-                          style: TextStyle(fontSize: 11, color: _subColor)),
-                  ],
-                ),
+                Builder(builder: (_) {
+                  // 부족 인원 오름차순 — 발동 임박(1~3명 부족)은 강조 (웹 B안 동일)
+                  int lackOf(Map<String, dynamic> f) =>
+                      ((f['threshold'] as num?)?.toInt() ?? 8) - (f['candidates'] as List? ?? []).length;
+                  final sorted = [...inactive]..sort((a, b) => lackOf(a).compareTo(lackOf(b)));
+                  return Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final f in sorted)
+                        Builder(builder: (_) {
+                          final lack = lackOf(f);
+                          final near = lack <= 3;
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () => _openTcRecoSheet(f, isActive: false),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: near ? _accent.withOpacity(.10) : Colors.transparent,
+                                border: Border.all(color: near ? _accent : _subColor.withOpacity(.45)),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '${f['name']} ${(f['candidates'] as List? ?? []).length}/${f['threshold']}'
+                                '${near ? ' · $lack명 부족' : ''}',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: near ? FontWeight.w700 : FontWeight.w500,
+                                    color: near ? _accent : _subColor),
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
+                  );
+                }),
                 const SizedBox(height: 6),
               ],
             ),
@@ -1935,7 +2362,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     );
   }
 
-  Widget _summaryCard() {
+  /// 총 급여·총 구단가치 — 스쿼드 그림 바로 위, 좌우 2칸 (2026-09-07 사용자 지정: 인원 표기 제거, 팀컬러 카드와 분리)
+  Widget _totalsBar() {
     num totalPay = 0;
     var payKnown = 0;
     num totalPrice = 0;
@@ -1947,6 +2375,41 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       }
       totalPrice += _priceAt(s.player!, s.grade);
     }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: _totalCell('총 급여', payKnown == 0 ? '-' : '$totalPay / $_payLimit',
+                color: totalPay > _payLimit ? _rose : null),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: _totalCell('총 구단가치', totalPrice == 0 ? '-' : formatBp(totalPrice))),
+        ],
+      ),
+    );
+  }
+
+  Widget _totalCell(String label, String value, {Color? color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _subColor.withOpacity(.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, color: _subColor)),
+          Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
+        ],
+      ),
+    );
+  }
+
+  /// 팀컬러 카드 (발동 목록 + 특성 배정) — 스쿼드 그림 아래
+  Widget _teamColorCard() {
     // 팀컬러 발동 목록 (소속/특성/강화 — 로고·발동 스킬 포함, 웹 renderTeamColor 이식)
     final tcEntries = <Map<String, dynamic>>[];
     final tc = _tcCalc?['total_team_color'] as Map?;
@@ -1977,41 +2440,6 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('인원', style: TextStyle(fontSize: 10, color: _subColor)),
-                      Text('${_filled.length}/11', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('총 급여', style: TextStyle(fontSize: 10, color: _subColor)),
-                      Text(payKnown == 0 ? '-' : '$totalPay / $_payLimit',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w800, color: totalPay > _payLimit ? _rose : null)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('총 구단가치', style: TextStyle(fontSize: 10, color: _subColor)),
-                      Text(totalPrice == 0 ? '-' : formatBp(totalPrice),
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
             Text('팀컬러', style: TextStyle(fontSize: 10, color: _subColor)),
             const SizedBox(height: 4),
             if (_filled.isEmpty)
@@ -2136,37 +2564,10 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             final w = constraints.maxWidth;
             final h = constraints.maxHeight;
             final cardW = w / 5.4;
-            return Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
-                ),
-                border: Border.all(color: Colors.white24),
-              ),
+            // 축구장 배경(시안 A) — 라인 마킹은 PitchField가 그림 (2026-09-07)
+            return PitchField(
               child: Stack(
                 children: [
-                  // 하프라인·센터서클 (간단 필드 마킹)
-                  Positioned(
-                    top: h * 0.42,
-                    left: 0,
-                    right: 0,
-                    child: Container(height: 1, color: Colors.white24),
-                  ),
-                  Positioned(
-                    top: h * 0.42 - w * 0.09,
-                    left: w / 2 - w * 0.09,
-                    child: Container(
-                      width: w * 0.18,
-                      height: w * 0.18,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white24),
-                      ),
-                    ),
-                  ),
                   for (var i = 0; i < _slots.length; i++)
                     Builder(builder: (context) {
                       final slot = _slots[i];
@@ -2177,7 +2578,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                       return Positioned(
                         left: (w - cardW) * fx,
                         top: 8 + (h - cardW * 0.62 - 58) * fy,
-                        child: _slotCard(i, cardW),
+                        child: _draggableSlot(i, cardW),
                       );
                     }),
                 ],
@@ -2234,16 +2635,19 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 child: Text(_error!, style: TextStyle(color: _rose)),
               ),
             const SizedBox(height: 12),
-            _summaryCard(),
+            _totalsBar(),
             _field(),
             const SizedBox(height: 8),
             _actionBar(),
             const SizedBox(height: 6),
             Text(
-              '빈 자리를 누르면 선수 검색/랭커픽, 배치된 카드를 누르면 강화·시즌 변경이 가능합니다.'
+              '빈 자리를 누르면 선수 검색/랭커픽, 배치된 카드를 누르면 강화·시즌 변경, '
+              '길게 눌러 끌어다 놓으면 자리를 바꿀 수 있습니다(골키퍼 제외).'
               '${_snapDate.isNotEmpty ? ' ($_snapDate 랭커픽 수집 기준)' : ''}',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
+            const SizedBox(height: 12),
+            _teamColorCard(),
             if (_metaLoading)
               const Padding(
                 padding: EdgeInsets.only(top: 24),
@@ -2254,4 +2658,21 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
+}
+
+/// 팀컬러 멤버 추천 — 후보 카드 1장 (그 자리 0강 eachOvr)
+class _TcRecoPick {
+  final Map<String, dynamic> m;
+  final int ovr;
+  const _TcRecoPick(this.m, this.ovr);
+}
+
+/// 팀컬러 멤버 추천 — 슬롯 1개의 추천 결과
+class _TcRecoEntry {
+  final int idx;
+  final _Slot slot;
+  final int cur; // 현재 선수의 그 자리 0강 OVR (빈 자리면 0)
+  final List<_TcRecoPick> recs;
+  final int best; // recs.first.ovr - cur
+  const _TcRecoEntry({required this.idx, required this.slot, required this.cur, required this.recs, required this.best});
 }

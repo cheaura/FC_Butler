@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'badges.dart';
 import '../services/api_service.dart';
+import '../utils/fc_format.dart';
 import 'pill_tabs.dart';
 
 /// 이적시장 탭 — 본인 넥슨 오픈API 키를 기기에만 저장하고 앱이 넥슨에 직접 호출
@@ -894,7 +895,7 @@ class _MarketTabState extends State<MarketTab>
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
-          GradeBadge(grade: grade, fontSize: 11),
+          GradeBadge(grade: grade, size: 19),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -976,7 +977,7 @@ class _MarketTabState extends State<MarketTab>
           Expanded(
             child: Text(
                 '${_nickname ?? ''}의 최근 경기 스쿼드 기준'
-                '${_pnlFormation.isNotEmpty ? ' · $_pnlFormation' : ''}',
+                '${_pnlFormation.isNotEmpty ? ' · ${fmtFormation(_pnlFormation)}' : ''}',
                 style: TextStyle(fontSize: 12, color: _subColor)),
           ),
           TextButton(
@@ -1107,7 +1108,7 @@ class _MarketTabState extends State<MarketTab>
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
-          GradeBadge(grade: (p['grade'] as num?)?.toInt() ?? 1, fontSize: 11),
+          GradeBadge(grade: (p['grade'] as num?)?.toInt() ?? 1, size: 19),
           const SizedBox(width: 8),
           Expanded(
             child: Column(

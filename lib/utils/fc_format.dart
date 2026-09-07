@@ -1,3 +1,11 @@
+/// 5줄 포메이션("4-1-2-3-0")을 넥슨 표기("4-1-2-3")로 — 0인 줄 생략 (2026-09-07 공용화).
+/// 서버 랭커 스냅샷 키·유저 스쿼드 formation5는 5줄 원형이라 표시 시점에만 정규화한다.
+/// 필터 값(서버 키)은 원형을 유지해야 하므로 이 함수는 표시에만 쓸 것.
+String fmtFormation(dynamic form) {
+  if (form == null) return '';
+  return form.toString().split('-').where((x) => x.isNotEmpty && x != '0').join('-');
+}
+
 /// FC온라인 BP 금액 표기 (경/조/억 단위 축약)
 String formatBp(num? v) {
   if (v == null) return '-';

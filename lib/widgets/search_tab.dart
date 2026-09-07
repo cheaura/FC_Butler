@@ -6,8 +6,11 @@ import '../screens/training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/recent_search_store.dart';
+import '../services/player_meta_store.dart';
 import '../screens/match_detail_screen.dart';
+import '../utils/fc_format.dart';
 import 'pill_tabs.dart';
+import 'pitch_field.dart';
 import 'player_field_card.dart';
 
 /// 검색 탭으로 전달되는 검색 요청 (홈 타일·최근 감독에서 사용)
@@ -1045,12 +1048,71 @@ class _SearchTabState extends State<SearchTab>
             _squad!['success'] != true) {
           setState(() => _squad = parsed);
         }
+        if (parsed['success'] == true) _ensureSquadMeta(parsed);
       }
     } catch (e) {
       print('[SearchTab] 스쿼드 로드 실패: $e');
     } finally {
       if (mounted) setState(() => _squadLoading = false);
     }
+  }
+
+  /// 선발 11명의 시세 확보(묶음 1회) → 총 구단가치 표시 (2026-09-07 사용자 요청)
+  Future<void> _ensureSquadMeta(Map<String, dynamic> squad) async {
+    final spids = (squad['players'] as List? ?? [])
+        .whereType<Map>()
+        .map((p) => p['spid'] as num?)
+        .whereType<num>()
+        .toList();
+    if (spids.isEmpty) return;
+    try {
+      await PlayerMetaStore.ensureAll(spids, freshPrice: true);
+    } catch (e) {
+      print('[SearchTab] 스쿼드 시세 확보 실패: $e');
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// 슬롯 포지션 기준 OVR = eachOvr[포지션] + 강화 보너스 + 적응도 Lv.5 (스쿼드 탭과 같은 식, 팀컬러 미반영)
+  static int? _squadOvr(Map<String, dynamic> p) {
+    final eo = (p['each_ovr'] ?? p['eachOvr'])?.toString() ?? '';
+    if (eo.isEmpty) return null;
+    final vals = eo.split(',');
+    final pos = (p['sp_position'] as num? ?? 0).toInt();
+    if (pos >= vals.length) return null;
+    final base = int.tryParse(vals[pos].trim()) ?? 0;
+    if (base == 0) return null;
+    final grade = (p['grade'] as num? ?? 1).toInt();
+    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0);
+  }
+
+  /// 강화 단계 시세 (메타 저장소의 30분 이내 시세만)
+  static num _squadPriceAt(Map<String, dynamic> p) {
+    final ep = PlayerMetaStore.cachedPrice(p['spid'] as num?) ?? '';
+    if (ep.isEmpty) return 0;
+    final parts = ep.split('|');
+    final grade = (p['grade'] as num? ?? 1).toInt();
+    if (grade >= parts.length) return 0;
+    final digits = parts[grade].replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.isEmpty ? 0 : (int.tryParse(digits) ?? 0);
+  }
+
+  Widget _squadTotalCell(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _subColor.withOpacity(.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, color: _subColor)),
+          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
   }
 
   List<Widget> _buildSquadSeg() {
@@ -1082,7 +1144,7 @@ class _SearchTabState extends State<SearchTab>
                   const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
           const Spacer(),
           if ((s['formation5'] ?? '').toString().isNotEmpty)
-            Text('포메이션 ${s['formation5']}',
+            Text('포메이션 ${fmtFormation(s['formation5'])}',
                 style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -1090,6 +1152,40 @@ class _SearchTabState extends State<SearchTab>
         ],
       ),
       const SizedBox(height: 8),
+      // 총 급여·총 구단가치 — 스쿼드 그림 바로 위, 좌우 2칸 (스쿼드 탭과 동일 형식)
+      Builder(builder: (_) {
+        num totalPay = 0;
+        var payKnown = 0;
+        num totalPrice = 0;
+        var priceKnown = 0;
+        for (final p in players) {
+          final pay = num.tryParse('${p['pay'] ?? ''}');
+          if (pay != null) {
+            totalPay += pay;
+            payKnown++;
+          }
+          final pr = _squadPriceAt(p);
+          if (pr > 0) {
+            totalPrice += pr;
+            priceKnown++;
+          }
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(child: _squadTotalCell('총 급여', payKnown == 0 ? '-' : '$totalPay')),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: _squadTotalCell(
+                      '총 구단가치',
+                      priceKnown == 0
+                          ? '계산 중…'
+                          : formatBp(totalPrice) + (priceKnown < players.length ? ' (일부)' : ''))),
+            ],
+          ),
+        );
+      }),
       _squadFieldView(players),
       const SizedBox(height: 6),
       Text('가장 최근 경기의 선발 11명 기준입니다.',
@@ -1105,16 +1201,8 @@ class _SearchTabState extends State<SearchTab>
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           final cardW = w / 5.4;
-          return Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
-              ),
-              border: Border.all(color: Colors.white24),
-            ),
+          // 축구장 배경(시안 A) 공용 위젯 (2026-09-07)
+          return PitchField(
             child: Stack(
               children: [
                 for (final p in players)
@@ -1125,6 +1213,10 @@ class _SearchTabState extends State<SearchTab>
                     final fx = coord[0] / 100.0;
                     final fy = (85 - coord[1]) / 100.0;
                     final spid = (p['spid'] as num?)?.toInt();
+                    final serverFace = p['face_url']?.toString() ?? '';
+                    final faceUrl = serverFace.isNotEmpty
+                        ? serverFace
+                        : 'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png';
                     // 공용 카드 (2026-08-19 재확정 배치):
                     // 좌상 POS·아래 신규특성 / 좌하 시즌·우하 강화 (카드 내부 처리)
                     return Positioned(
@@ -1134,10 +1226,13 @@ class _SearchTabState extends State<SearchTab>
                         cardW: cardW,
                         spPos: pos,
                         spid: spid,
-                        faceUrl:
-                            'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png',
+                        // 서버가 동봉한 face_url 우선 (spid 규칙 주소는 CDN에 없는 카드가 있음, 2026-09-07)
+                        faceUrl: faceUrl,
                         name: '${p['name']}',
                         grade: (p['grade'] as num? ?? 1).toInt(),
+                        // 우상 OVR·급여 육각 — 스쿼드 탭과 같은 자리 (2026-09-07)
+                        ovr: _squadOvr(p),
+                        pay: p['pay'],
                         seasonFallback: p['season']?.toString(),
                         // 카드 탭 → 집훈 계산기 (2026-08-22)
                         onTap: spid == null
@@ -1148,8 +1243,7 @@ class _SearchTabState extends State<SearchTab>
                                     name: '${p['name']}',
                                     grade: (p['grade'] as num? ?? 1).toInt(),
                                     role: role,
-                                    faceUrl:
-                                        'https://fco.dn.nexoncdn.co.kr/live/externalAssets/common/playersAction/p$spid.png',
+                                    faceUrl: faceUrl,
                                     season: p['season']?.toString(),
                                   ),
                                 )),

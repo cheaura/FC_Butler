@@ -6,6 +6,7 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../widgets/badges.dart';
 import '../widgets/pill_tabs.dart';
+import '../widgets/pitch_field.dart';
 import '../widgets/player_field_card.dart';
 
 /// 경기별 분석 화면 — 전적 목록에서 경기 탭으로 진입.
@@ -479,16 +480,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           final cardW = w / 5.2;
-          return Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
-              ),
-              border: Border.all(color: Colors.white24),
-            ),
+          // 축구장 배경(시안 A) 공용 위젯 (2026-09-07)
+          return PitchField(
             child: Stack(
               children: [
                 for (final p in players)
@@ -592,7 +585,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
               height: 13,
               fallbackText: p['season']?.toString()),
           const SizedBox(width: 5),
-          GradeBadge(grade: (p['grade'] as num? ?? 1).toInt(), fontSize: 9.5),
+          GradeBadge(grade: (p['grade'] as num? ?? 1).toInt(), size: 16),
           Flexible(
             child: Text(
                 '${(status['goal'] ?? 0) > 0 ? ' ${status['goal']}골' : ''}'
@@ -706,7 +699,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                           const SizedBox(width: 5),
                           GradeBadge(
                               grade: (p['grade'] as num? ?? 1).toInt(),
-                              fontSize: 10),
+                              size: 17),
                           Text(
                               ' ${kSpposRole[(p['position'] as num?)?.toInt() ?? 28]?.toUpperCase() ?? '교체'}'
                               '${p['pay'] != null ? ' · 급여 ${p['pay']}' : ''}',

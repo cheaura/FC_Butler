@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../utils/fc_format.dart';
 
 class AnalysisTab extends StatefulWidget {
   final String username;
@@ -766,6 +767,5 @@ class _AnalysisTabState extends State<AnalysisTab> with AutomaticKeepAliveClient
   }
 }
 
-/// 5줄 포메이션(4-1-2-3-0)을 넥슨 표기(4-1-2-3)로 — 0인 줄 생략. 서버 캐시의 옛 형식 대비 표시 시점 정규화 (2026-09-05)
-String _fmtFormation(dynamic form) =>
-    form.toString().split('-').where((x) => x.isNotEmpty && x != '0').join('-');
+/// 5줄 포메이션(4-1-2-3-0)을 넥슨 표기(4-1-2-3)로 — 공용 fmtFormation 위임 (2026-09-07)
+String _fmtFormation(dynamic form) => fmtFormation(form);

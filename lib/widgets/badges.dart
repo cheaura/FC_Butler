@@ -1,45 +1,58 @@
 import 'package:flutter/material.dart';
-import '../constants/positions.dart';
 import '../services/season_meta.dart';
 
-/// 강화 단계 배지 — 웹 스쿼드 탭 확정 색 체계와 동일:
-/// 1 회백 / 2~4 브론즈 / 5~7 실버 / 8~10 골드 / 11~13 넥슨 플래티넘 판(bg_plt.png 원본).
+/// 강화 단계 배지 — 웹 대시보드(user_dashboard.css .pitch-player-grade / .squad-slot-gradebadge)와 동일 규격 (2026-09-07 사용자 요청):
+/// 정사각에 가까운 상자, 숫자만, 1px 테두리, 옅은 그림자.
+/// 색: 1 회백 #C5C8C9 / 2~4 브론즈 #CD7F32 / 5~7 실버 #C0C0C0 / 8~10 골드 #FFD700 / 11~13 넥슨 플래티넘 판(내장 assets/grade_plt.png)+파란 테두리.
 class GradeBadge extends StatelessWidget {
   final int grade;
-  final double fontSize;
-  const GradeBadge({Key? key, required this.grade, this.fontSize = 11})
+  /// 배지 높이(px). 너비는 높이의 1.15배, 글자는 높이의 0.62배.
+  final double size;
+  const GradeBadge({Key? key, required this.grade, this.size = 18})
       : super(key: key);
 
-  static const String _pltUrl =
-      'https://ssl.nexon.com/s2/game/fc/online/obt/datacenter/bg_plt.png';
+  /// 웹 CSS와 같은 단계별 (배경, 테두리, 글자색)
+  static ({Color bg, Color border, Color fg}) _style(int g) {
+    if (g >= 8) return (bg: const Color(0xFFFFD700), border: const Color(0xFFDAA520), fg: const Color(0xFF8B4513));
+    if (g >= 5) return (bg: const Color(0xFFC0C0C0), border: const Color(0xFF999999), fg: const Color(0xFF333333));
+    if (g >= 2) return (bg: const Color(0xFFCD7F32), border: const Color(0xFFA05A2C), fg: const Color(0xFFFFFFFF));
+    return (bg: const Color(0xFFC5C8C9), border: const Color(0xFF999999), fg: const Color(0xFF333333));
+  }
 
   @override
   Widget build(BuildContext context) {
-    final text = Text('+$grade',
-        style: TextStyle(
-            fontSize: fontSize,
-            fontWeight: FontWeight.w800,
-            color: Colors.black87));
+    final w = size * 1.15;
+    final radius = BorderRadius.circular(size * 0.18);
+    const shadow = [BoxShadow(color: Color(0x80000000), blurRadius: 2, offset: Offset(0, 1))];
     if (grade >= 11) {
-      // 플래티넘 판은 넥슨 원본 이미지 (색 근사가 아니라 실물 — 사용자 교정)
+      // 플래티넘 판 — 넥슨 원본 이미지를 앱에 내장 (네트워크 불필요)
       return Container(
-        padding: EdgeInsets.symmetric(horizontal: fontSize * 0.5, vertical: 2),
+        width: w,
+        height: size,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(5),
-          image: const DecorationImage(
-              image: NetworkImage(_pltUrl), fit: BoxFit.cover),
-          color: const Color(0xFFD8E4E8), // 이미지 로드 전 근사색
+          borderRadius: radius,
+          image: const DecorationImage(image: AssetImage('assets/grade_plt.png'), fit: BoxFit.cover),
+          border: Border.all(color: const Color(0xFF607DC4), width: 1),
+          boxShadow: shadow,
         ),
-        child: text,
+        child: Text('$grade',
+            style: TextStyle(fontSize: size * 0.62, fontWeight: FontWeight.w900, height: 1, color: const Color(0xFF2D2B43))),
       );
     }
+    final st = _style(grade);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: fontSize * 0.5, vertical: 2),
+      width: w,
+      height: size,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: gradeColor(grade),
-        borderRadius: BorderRadius.circular(5),
+        color: st.bg,
+        borderRadius: radius,
+        border: Border.all(color: st.border, width: 1),
+        boxShadow: shadow,
       ),
-      child: text,
+      child: Text('$grade',
+          style: TextStyle(fontSize: size * 0.62, fontWeight: FontWeight.w800, height: 1, color: st.fg)),
     );
   }
 }
