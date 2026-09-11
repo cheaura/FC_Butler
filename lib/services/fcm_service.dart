@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart' show MethodCall, MethodChannel, MissingPluginException;
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -65,6 +66,10 @@ class FCMService {
     try {
       if (Platform.isIOS) {
         _apnsChannel.setMethodCallHandler(_onApnsCall);
+        // 아이콘 뱃지 0 (2026-09-12): 앱 시작 시 + Dart 수명주기 resumed마다 네이티브에 요청.
+        // 네이티브 활성화 콜백이 UIScene 구조에서 안 오던 문제의 예비 경로 (관찰자 방식과 이중화).
+        WidgetsBinding.instance.addObserver(_BadgeClearObserver(this));
+        unawaited(clearBadge());
       }
 
       // 알림 권한 요청 (거부돼도 리스너·토큰 준비는 계속 — 설정에서 켜면 바로 동작)
@@ -147,6 +152,18 @@ class FCMService {
   }
 
   /// 네이티브에 저장된 APNs 등록 상태를 물어본다 (AppDelegate 미갱신 빌드면 null)
+  /// iOS 아이콘 뱃지를 0으로 (네이티브 채널). 구 AppDelegate(채널 없음)·실패는 무시.
+  Future<void> clearBadge() async {
+    if (!Platform.isIOS) return;
+    try {
+      await _apnsChannel.invokeMethod<dynamic>('clearBadge');
+    } on MissingPluginException {
+      // 구 AppDelegate — 채널 없음
+    } catch (e) {
+      print('[FCM] 뱃지 초기화 실패: $e');
+    }
+  }
+
   Future<Map<String, dynamic>?> _queryApnsStatus() async {
     if (!Platform.isIOS) return null;
     try {
@@ -374,4 +391,17 @@ class FCMService {
 
   /// APNs 등록 상태 (iOS 진단용)
   Map<String, dynamic>? get apnsStatus => _apnsStatus;
+}
+
+/// 앱이 다시 활성화(resumed)될 때 iOS 아이콘 뱃지를 지우는 관찰자 (2026-09-12)
+class _BadgeClearObserver extends WidgetsBindingObserver {
+  final FCMService _svc;
+  _BadgeClearObserver(this._svc);
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_svc.clearBadge());
+    }
+  }
 }

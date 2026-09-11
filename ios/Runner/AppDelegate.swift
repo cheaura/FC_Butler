@@ -28,19 +28,32 @@ import FirebaseMessaging
     application.registerForRemoteNotifications()
     apnsStatus["requested"] = true
     apnsStatus["requestedAt"] = ISO8601DateFormatter().string(from: Date())
+    // 앱 활성화 알림을 NotificationCenter로 관찰 (2026-09-12): UIScene 수명주기(새 Flutter iOS 구조)에서는
+    // 앱 대리자의 applicationDidBecomeActive가 호출되지 않아 09-11의 오버라이드 방식이 동작하지 않았음(TestFlight 실기).
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(clearBadge),
+      name: UIApplication.didBecomeActiveNotification, object: nil)
+    clearBadge()
     return ok
   }
 
-  // 앱이 활성화될 때마다 아이콘 뱃지를 0으로 (2026-09-11).
-  // 서버가 모든 푸시에 badge=1을 실어 보내던 시절의 값이 iOS에 영구 보관돼 '1'이 지워지지 않던 문제.
-  // 미확인 건수 추적이 없으므로 "앱을 열면 확인한 것"으로 간주한다.
+  // 아이콘 뱃지를 0으로. 앱 활성화(관찰자)·Dart 요청(채널 clearBadge)·구 방식 콜백 세 경로에서 호출된다.
+  // 미확인 건수 추적이 없으므로 "앱을 열면 확인한 것"으로 간주한다. 두 API를 모두 써서 iOS 버전 차이를 흡수.
+  @objc private func clearBadge() {
+    UIApplication.shared.applicationIconBadgeNumber = 0
+    if #available(iOS 16.0, *) {
+      UNUserNotificationCenter.current().setBadgeCount(0) { error in
+        if let error = error {
+          NSLog("[BADGE] setBadgeCount(0) 실패: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  // 구 수명주기(UIScene 미사용)에서는 이 콜백도 온다 — 관찰자와 중복 호출돼도 무해
   override func applicationDidBecomeActive(_ application: UIApplication) {
     super.applicationDidBecomeActive(application)
-    if #available(iOS 16.0, *) {
-      UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
-    } else {
-      application.applicationIconBadgeNumber = 0
-    }
+    clearBadge()
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
@@ -53,6 +66,10 @@ import FirebaseMessaging
     channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       if call.method == "getApnsStatus" {
         result(self?.apnsStatus ?? ["state": "unknown"])
+      } else if call.method == "clearBadge" {
+        // Dart 쪽 수명주기(resumed)에서 요청 — 네이티브 활성화 콜백이 안 오는 구조의 예비 경로
+        self?.clearBadge()
+        result(true)
       } else {
         result(FlutterMethodNotImplemented)
       }
