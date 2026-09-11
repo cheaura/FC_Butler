@@ -81,6 +81,9 @@ class ErrorReporter {
   static void report(Object error, StackTrace? stack, {String context = ''}) {
     try {
       final type = error.runtimeType.toString();
+      // 이미지 로드 실패(선수 사진 403 등)는 위젯의 errorBuilder/대체 주소가 처리하는 정상 경로라 기록하지 않는다.
+      // (오류 기록 66건 중 49건이 이 유형이라 실제 버그가 묻히던 문제 — 2026-09-11)
+      if (type == 'NetworkImageLoadException') return;
       final message = _oneLine(error.toString());
       final key = '$type|${message.substring(0, message.length > 160 ? 160 : message.length)}|$currentScreen';
       final now = DateTime.now();

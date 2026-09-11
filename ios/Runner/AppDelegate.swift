@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import UserNotifications
 import FirebaseMessaging
 
 // Flutter 3.35+ 새 형식(FlutterImplicitEngineDelegate). 맥 빌드 도구가 자동 이관한 형식과 동일하게 맞춤 (2026-09-05).
@@ -28,6 +29,18 @@ import FirebaseMessaging
     apnsStatus["requested"] = true
     apnsStatus["requestedAt"] = ISO8601DateFormatter().string(from: Date())
     return ok
+  }
+
+  // 앱이 활성화될 때마다 아이콘 뱃지를 0으로 (2026-09-11).
+  // 서버가 모든 푸시에 badge=1을 실어 보내던 시절의 값이 iOS에 영구 보관돼 '1'이 지워지지 않던 문제.
+  // 미확인 건수 추적이 없으므로 "앱을 열면 확인한 것"으로 간주한다.
+  override func applicationDidBecomeActive(_ application: UIApplication) {
+    super.applicationDidBecomeActive(application)
+    if #available(iOS 16.0, *) {
+      UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+    } else {
+      application.applicationIconBadgeNumber = 0
+    }
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

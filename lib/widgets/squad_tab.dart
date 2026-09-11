@@ -17,6 +17,7 @@ import '../services/player_meta_store.dart';
 import '../services/ovr_formula.dart';
 import '../utils/fc_format.dart';
 import 'badges.dart';
+import 'face_image.dart';
 import 'pill_tabs.dart';
 import 'pitch_field.dart';
 import 'player_field_card.dart';
@@ -308,20 +309,25 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     );
   }
 
-  /// 카드 시트용 팀컬러 칩 목록 (국가 파랑 · 클럽 주황 · 특성 보라 · 발동 중 초록)
+  /// 카드 시트용 팀컬러 칩 목록 (국가 파랑 · 클럽 주황 · 특성 = 색상 프리셋 강조색 · 발동 중 초록)
+  /// 범례는 색 이름 글자가 아니라 실제 칩 색 견본 점으로 그린다 — 프리셋에 따라 특성 색이 바뀌므로 (2026-09-11)
   Widget _tcChips(num? spid) {
     final list = _cardTcList(spid);
     if (list.isEmpty) return const SizedBox.shrink();
     final active = _activeTcIds();
-    final good = Theme.of(context).brightness == Brightness.dark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final good = isDark ? const Color(0xFF4ADE80) : const Color(0xFF15803D);
+    // 팀컬러 종류 색은 전부 고정색 — 색상 프리셋과 무관 (2026-09-11).
+    // 특성 색을 프리셋 강조색에 연동하면 딥그린·코랄 프리셋(주황)에서 클럽과, 스카이(하늘)에서 국가와,
+    // 직접 만들기 초록 계열에서 '발동 중'과 겹쳐 구분이 불가능해지던 문제(사용자 지적).
     Color kindColor(String kind) {
       switch (kind) {
         case 'nation':
-          return const Color(0xFF60A5FA);
+          return const Color(0xFF60A5FA); // 파랑
         case 'club':
-          return const Color(0xFFF59E0B);
+          return const Color(0xFFF59E0B); // 주황
         default:
-          return PanenkaTokens.of(context).accentInk; // 색상 프리셋 강조색
+          return isDark ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED); // 보라 (라이트는 진하게)
       }
     }
 
@@ -353,7 +359,32 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           ],
         ),
         const SizedBox(height: 4),
-        Text('파랑 국가 · 주황 클럽 · 보라 특성 · 초록 지금 발동 중', style: TextStyle(fontSize: 10, color: _subColor)),
+        Wrap(
+          spacing: 10,
+          runSpacing: 2,
+          children: [
+            _tcLegend(kindColor('nation'), '국가'),
+            _tcLegend(kindColor('club'), '클럽'),
+            _tcLegend(kindColor('trait'), '특성'),
+            _tcLegend(good, '지금 발동 중'),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 팀컬러 범례 1칸: 실제 칩 색 견본 점 + 이름 (색 이름 글자를 쓰지 않아 프리셋이 바뀌어도 어긋나지 않음)
+  Widget _tcLegend(Color c, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 3),
+        Text(label, style: TextStyle(fontSize: 10, color: _subColor)),
       ],
     );
   }
@@ -1469,12 +1500,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                     enabled: !dup,
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                                     leading: ClipOval(
-                                      child: Image.network(
-                                        p['face_url'] ?? '',
+                                      child: FaceImage(
+                                        url: p['face_url']?.toString(),
+                                        spid: p['spid'] as num?,
                                         width: 40,
                                         height: 40,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40),
+                                        fallback: const Icon(Icons.person, size: 40),
                                       ),
                                     ),
                                     title: Text('${p['name']}${dup ? ' (다른 자리 사용 중)' : ''}',
@@ -1534,12 +1565,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       selected: isCurrent,
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: ClipOval(
-        child: Image.network(
-          p['face_url'] ?? '',
+        child: FaceImage(
+          url: p['face_url']?.toString(),
+          spid: p['spid'] as num?,
           width: 40,
           height: 40,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40),
+          fallback: const Icon(Icons.person, size: 40),
         ),
       ),
       title: Row(
@@ -1589,6 +1620,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           if (!loadRequested) {
             loadRequested = true;
             _searchPlayers(p['name']?.toString() ?? '').then((players) {
+              // 검색 응답이 오기 전에 시트를 닫으면 setSheet가 폐기된 상태를 건드려 'Null check operator' 오류
+              // (오류 자동 기록 5건·41회, 1.0.8~1.0.12 — 2026-09-11 수정)
+              if (!context.mounted) return;
               final pid = _playerPid(p);
               final v = (players ?? []).where((c) => _playerPid(c) == pid).toList();
               setSheet(() {
@@ -1614,12 +1648,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 Row(
                   children: [
                     ClipOval(
-                      child: Image.network(
-                        p['face_url'] ?? '',
+                      child: FaceImage(
+                        url: p['face_url']?.toString(),
+                        spid: p['spid'] as num?,
                         width: 48,
                         height: 48,
-                        fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) => const Icon(Icons.person, size: 48),
+                        fallback: const Icon(Icons.person, size: 48),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2636,17 +2670,17 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             final w = constraints.maxWidth;
             final h = constraints.maxHeight;
             final cardW = w / 5.4;
+            // 겹침 방지 공용 배치 (같은 줄 자동 분산 — ST·CF 등, 2026-09-11)
+            final coords = layoutRoleCoords(
+                [for (final s in _slots) kSpposRole[s.spPos] ?? 'cm']);
             // 축구장 배경(시안 A) — 라인 마킹은 PitchField가 그림 (2026-09-07)
             return PitchField(
               child: Stack(
                 children: [
                   for (var i = 0; i < _slots.length; i++)
                     Builder(builder: (context) {
-                      final slot = _slots[i];
-                      final role = kSpposRole[slot.spPos] ?? 'cm';
-                      final coord = kRoleCoord[role] ?? const [50, 40];
-                      final fx = coord[0] / 100.0;
-                      final fy = (85 - coord[1]) / 100.0;
+                      final fx = coords[i][0];
+                      final fy = coords[i][1];
                       return Positioned(
                         left: (w - cardW) * fx,
                         top: 8 + (h - cardW * 0.62 - 58) * fy,

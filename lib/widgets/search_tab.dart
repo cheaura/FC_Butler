@@ -9,6 +9,7 @@ import '../services/recent_search_store.dart';
 import '../services/player_meta_store.dart';
 import '../screens/match_detail_screen.dart';
 import '../utils/fc_format.dart';
+import '../utils/tier_names.dart';
 import 'pill_tabs.dart';
 import 'pitch_field.dart';
 import 'player_field_card.dart';
@@ -390,8 +391,14 @@ class _SearchTabState extends State<SearchTab>
           PillTabs(
             labels: _modeLabels.values.toList(),
             selectedIndex: _modeLabels.keys.toList().indexOf(_mode),
-            onSelected: (i) =>
-                setState(() => _mode = _modeLabels.keys.toList()[i]),
+            onSelected: (i) {
+              // 모드 탭 전환 시 현재 입력된 감독명으로 즉시 재조회 (2026-09-11 사용자 요청).
+              // X로 지운 뒤(입력창 비어 있음)에는 조회하지 않아 다른 감독명 입력이 가능하다.
+              final next = _modeLabels.keys.toList()[i];
+              if (next == _mode || _loading) return;
+              setState(() => _mode = next);
+              if (_nameController.text.trim().isNotEmpty) _search();
+            },
           ),
           const SizedBox(height: 14),
           if (_error != null)
@@ -488,7 +495,8 @@ class _SearchTabState extends State<SearchTab>
             title: Text(r['name'] ?? '',
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text(
-                '${r['tier'] ?? ''} · ${_modeLabels[r['mode']] ?? r['mode']}',
+                // 등급명은 저장된 텍스트 대신 아이콘 번호로 재계산 (옛 서버 표의 '월드클래스 N부' 오표기 교정)
+                '${tierLabel(r['tier'], r['tier_icon'])} · ${_modeLabels[r['mode']] ?? r['mode']}',
                 style: TextStyle(fontSize: 12, color: _subColor)),
             trailing: IconButton(
               icon: Icon(Icons.close, size: 18, color: _subColor),
@@ -547,7 +555,8 @@ class _SearchTabState extends State<SearchTab>
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.w800)),
                 Text(
-                    '${d['tier'] ?? ''} · ${_modeLabels[res['mode']] ?? ''}',
+                    // 등급명은 아이콘 번호로 재계산 (서버 옛 표의 마스터→'월드클래스 N부' 오표기 교정, 2026-09-11)
+                    '${tierLabel(d['tier'], d['tier_icon'])} · ${_modeLabels[res['mode']] ?? ''}',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -588,15 +597,8 @@ class _SearchTabState extends State<SearchTab>
   /// 등급명 → 넥슨 티어 로고 URL.
   /// 등급 순서(높은 순) = ico_rank0~20 순번 — 2026-08-19 update_2026 아이콘 21종 실측 확인
   /// (슈챔 왕관·챌린저 청록·마스터 초록·월클 보라·프로 주황·유망주 살구로 그룹 일치 검증).
-  static const List<String> _tierOrder = [
-    '슈퍼 챔피언스', '챔피언스', '슈퍼 챌린지',
-    '챌린저1', '챌린저2', '챌린저3',
-    '마스터1', '마스터2', '마스터3',
-    '월드클래스1', '월드클래스2', '월드클래스3',
-    '프로1', '프로2', '프로3',
-    '세미프로1', '세미프로2', '세미프로3',
-    '유망주1', '유망주2', '유망주3',
-  ];
+  /// 표 본체는 utils/tier_names.dart의 kTierOrder (2026-09-11 공용화 — 홈 탭·최근 검색과 공유)
+  static const List<String> _tierOrder = kTierOrder;
 
   String? _tierIconUrl(String tier) {
     final idx = _tierOrder.indexOf(tier.trim());
@@ -1243,17 +1245,22 @@ class _SearchTabState extends State<SearchTab>
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           final cardW = w / 5.4;
+          // 겹침 방지 공용 배치 (같은 줄 자동 분산 — ST·CF 등, 2026-09-11)
+          final coords = layoutRoleCoords([
+            for (final p in players)
+              kSpposRole[(p['sp_position'] as num?)?.toInt() ?? 14] ?? 'cm'
+          ]);
           // 축구장 배경(시안 A) 공용 위젯 (2026-09-07)
           return PitchField(
             child: Stack(
               children: [
-                for (final p in players)
+                for (var i = 0; i < players.length; i++)
                   Builder(builder: (context) {
+                    final p = players[i];
                     final pos = (p['sp_position'] as num?)?.toInt() ?? 14;
                     final role = kSpposRole[pos] ?? 'cm';
-                    final coord = kRoleCoord[role] ?? const [50, 40];
-                    final fx = coord[0] / 100.0;
-                    final fy = (85 - coord[1]) / 100.0;
+                    final fx = coords[i][0];
+                    final fy = coords[i][1];
                     final spid = (p['spid'] as num?)?.toInt();
                     final serverFace = p['face_url']?.toString() ?? '';
                     final faceUrl = serverFace.isNotEmpty

@@ -45,6 +45,9 @@ class FCMService {
   static const MethodChannel _apnsChannel = MethodChannel('panenka/apns');
 
   String? _fcmToken;
+
+  /// 현재 기기의 FCM 토큰 (로그아웃 시 서버 등록 해제용, 2026-09-11)
+  String? get fcmToken => _fcmToken;
   String? _lastSentToken; // 같은 토큰 중복 전송 방지 (기기당 한 번)
   String? _pendingAuthToken; // FCM 토큰 준비 전에 로그인이 끝났을 때 보관 → 토큰이 오면 전송
   Future<String?>? _tokenFuture; // 진행 중인 발급 (중복 대기 방지)
@@ -79,11 +82,12 @@ class FCMService {
       await _initializeLocalNotifications();
       _bindListeners();
 
-      // iOS: 앱이 떠 있을 때도 시스템이 배너·소리·배지를 표시 (기본값은 표시 안 함)
+      // iOS: 앱이 떠 있을 때도 시스템이 배너·소리를 표시 (기본값은 표시 안 함)
+      // badge는 끔 (2026-09-11): 서버도 뱃지 값을 싣지 않고, AppDelegate가 활성화 시 뱃지를 0으로 내린다.
       if (Platform.isIOS) {
         await _firebaseMessaging.setForegroundNotificationPresentationOptions(
           alert: true,
-          badge: true,
+          badge: false,
           sound: true,
         );
       }

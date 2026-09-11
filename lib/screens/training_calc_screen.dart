@@ -418,9 +418,11 @@ if (widget.spid != null) {
                 final rspid = (r['spid'] is num) ? (r['spid'] as num).toInt() : int.tryParse('${r['spid']}') ?? 0;
                 return ActionChip(
                   avatar: ClipOval(
-                    child: Image.network('${r['face_url'] ?? ''}',
+                    child: FaceImage(
+                        url: r['face_url']?.toString(),
+                        spid: rspid,
                         width: 20, height: 20,
-                        errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 16)),
+                        fallback: const Icon(Icons.person, size: 16)),
                   ),
                   label: Text('${r['name'] ?? ''}${(r['season'] ?? '').toString().isNotEmpty ? ' · ${r['season']}' : ''}',
                       style: const TextStyle(fontSize: 12)),
@@ -487,10 +489,12 @@ child: Container(
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(8),
-                            child: Image.network(p['face_url']?.toString() ?? '',
+                            child: FaceImage(
+                                url: p['face_url']?.toString(),
+                                spid: p['spid'] as num?,
                                 width: 34,
                                 height: 34,
-                                errorBuilder: (_, __, ___) => const SizedBox(width: 34, height: 34)),
+                                fallback: const SizedBox(width: 34, height: 34)),
                           ),
                           const SizedBox(width: 8),
                           Expanded(

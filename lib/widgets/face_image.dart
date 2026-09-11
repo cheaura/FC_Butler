@@ -52,6 +52,10 @@ class FaceImage extends StatefulWidget {
 class _FaceImageState extends State<FaceImage> {
   late List<String> _urls;
   int _idx = 0;
+  // 후보 전환 예약 여부. Flutter의 Image 위젯은 오류 상태에서 부모가 다시 그릴 때마다 errorBuilder를
+  // 다시 호출하므로(image.dart build: _lastException != null), 호출마다 _idx를 올리면 살아 있는 후보를
+  // 건너뛰어 사람 아이콘으로 굳는다 (산체스 등 — 2026-09-11). 후보 1개당 전환은 정확히 1회만.
+  bool _advanceScheduled = false;
 
   @override
   void initState() {
@@ -65,6 +69,7 @@ class _FaceImageState extends State<FaceImage> {
     if (old.url != widget.url || old.spid != widget.spid) {
       _urls = FaceImage.candidates(widget.url, widget.spid);
       _idx = 0;
+      _advanceScheduled = false;
     }
   }
 
@@ -77,10 +82,16 @@ class _FaceImageState extends State<FaceImage> {
       height: widget.height,
       fit: widget.fit,
       errorBuilder: (c, e, s) {
-        // 다음 후보로 넘어감 (빌드 중 setState 금지 → 다음 프레임)
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _idx < _urls.length) setState(() => _idx++);
-        });
+        // 다음 후보로 넘어감 (빌드 중 setState 금지 → 다음 프레임). 같은 후보에 대해 한 번만 예약.
+        if (!_advanceScheduled) {
+          _advanceScheduled = true;
+          final failed = _idx;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _advanceScheduled = false;
+            if (_idx == failed && _idx < _urls.length) setState(() => _idx++);
+          });
+        }
         return widget.fallback;
       },
     );

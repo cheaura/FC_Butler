@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/recent_search_store.dart';
+import '../utils/tier_names.dart';
 
 /// 홈 탭 — 벤토 위젯 보드 (허브 역할, 사용자 확정 구조).
 /// 타일을 누르면 해당 하단 탭으로 이동만 한다 (검색 타일 → 검색 탭 등).
@@ -578,7 +579,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                                                   fontSize: 12.5,
                                                   fontWeight:
                                                       FontWeight.w800)),
-                                          Text(_recent[i]['tier'] ?? '',
+                                          Text(
+                                              tierLabel(_recent[i]['tier'],
+                                                  _recent[i]['tier_icon']),
                                               maxLines: 1,
                                               overflow:
                                                   TextOverflow.ellipsis,

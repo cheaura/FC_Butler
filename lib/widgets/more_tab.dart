@@ -27,7 +27,9 @@ class _MoreTabState extends State<MoreTab> {
   Color get _subColor => Colors.grey.shade500;
 
   Future<void> _logout() async {
-    await _apiService.clearAutoLogin();
+    // 서버 세션 종료 + FCM 토큰 등록 해제까지 (모니터 탭 로그아웃과 동일 경로, 2026-09-11).
+    // logout()은 서버 응답과 무관하게 로컬 인증 정보를 지운다.
+    await _apiService.logout();
     if (!mounted) return;
     setState(() {});
     widget.onAccountChanged?.call();

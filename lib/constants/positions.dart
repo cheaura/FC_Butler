@@ -22,6 +22,56 @@ const Map<String, List<double>> kRoleCoord = {
   'rw': [87, 80], 'rs': [70, 85], 'st': [50, 85], 'ls': [30, 85], 'lw': [13, 80],
 };
 
+/// 필드 카드 배치 좌표 계산 — 겹침 방지 공용 (스쿼드 탭·검색탭 스쿼드·경기 분석, 2026-09-11).
+///
+/// 입력: 슬롯별 역할 코드(kRoleCoord 키). 출력: 슬롯별 [fx, fy] (0~1, 기존 `coord/100`·`(85-y)/100`과 같은 축).
+/// 규칙:
+///  - y 차이가 [rowGap] 이내인 슬롯을 같은 줄로 묶는다 (최전방 rf/lf/rw/lw 80·cf 82·st/rs/ls 85가 한 줄).
+///  - 줄 안에서 이웃 x 간격이 [minDx] 미만이면(카드 폭 ≈ 화면 1/5.4 기준 x 22.7 미만이 겹침) 그 줄 전체를 균등 분산.
+///    ST(50)·CF(50)처럼 같은 자리에 겹치던 카드가 좌우로 나뉜다. 간격이 넉넉한 줄은 원 좌표를 유지한다.
+///  - 줄의 y는 그 줄에서 가장 앞선 값(최대 y)을 쓴다.
+List<List<double>> layoutRoleCoords(List<String> roles,
+    {double rowGap = 6, double minDx = 25}) {
+  final n = roles.length;
+  final xs = List<double>.filled(n, 50);
+  final ys = List<double>.filled(n, 40);
+  for (var i = 0; i < n; i++) {
+    final c = kRoleCoord[roles[i]] ?? const [50, 40];
+    xs[i] = c[0];
+    ys[i] = c[1];
+  }
+  // 줄 묶기: y 오름차순으로 훑으며 직전 슬롯과 rowGap 이내면 같은 줄
+  final order = List<int>.generate(n, (i) => i)
+    ..sort((a, b) => ys[a].compareTo(ys[b]));
+  final rows = <List<int>>[];
+  for (final i in order) {
+    if (rows.isNotEmpty && (ys[i] - ys[rows.last.last]).abs() <= rowGap) {
+      rows.last.add(i);
+    } else {
+      rows.add([i]);
+    }
+  }
+  final out = List<List<double>>.generate(
+      n, (i) => [xs[i] / 100.0, (85 - ys[i]) / 100.0]);
+  for (final row in rows) {
+    final rowY = row.map((i) => ys[i]).reduce((a, b) => a > b ? a : b);
+    row.sort((a, b) => xs[a].compareTo(xs[b]));
+    var crowded = false;
+    for (var k = 1; k < row.length; k++) {
+      if (xs[row[k]] - xs[row[k - 1]] < minDx) {
+        crowded = true;
+        break;
+      }
+    }
+    for (var k = 0; k < row.length; k++) {
+      final i = row[k];
+      final fx = crowded ? (k + 0.5) / row.length : xs[i] / 100.0;
+      out[i] = [fx, (85 - rowY) / 100.0];
+    }
+  }
+  return out;
+}
+
 /// 포지션 계열색 (GK 노랑 / DF 파랑 / MF 초록 / FW 빨강)
 Color posColor(int spPos) {
   if (spPos == 0) return Colors.amber.shade700;

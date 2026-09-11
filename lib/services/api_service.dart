@@ -143,8 +143,23 @@ class ApiService {
   }
 
   // ===== 인앱 계정 삭제 (탈퇴 — 스토어 정책 의무) =====
+  /// 회원 탈퇴 시 기기에 남는 개인 데이터 키 (2026-09-11).
+  /// 넥슨 오픈 API 키(평문)·최근 검색·저장 스쿼드·집훈 최근 카드 — "관련 데이터가 즉시 삭제됩니다" 안내와 맞춤.
+  static const List<String> _deviceDataKeysOnDelete = [
+    'nexon_api_accounts_v1', 'nexon_api_account_index', 'nexon_api_key', 'nexon_api_nickname',
+    'recent_searches_v1', 'squad_saved_v1', 'training_recent_cards_v1',
+  ];
+
   Future<Map<String, dynamic>> deleteAccount(String password) async {
     try {
+      // 서버에 등록한 넥슨 API 키(모니터 탭 이적시장)는 계정 삭제 전에 먼저 지운다 (실패해도 탈퇴는 진행)
+      final uname = _username;
+      if (uname != null && uname.isNotEmpty) {
+        try {
+          await deleteNexonKey(uname);
+        } catch (_) {}
+      }
+
       final response = await http.post(
         Uri.parse('$baseUrl/api/user/auth/delete-account'),
         headers: {
@@ -157,6 +172,14 @@ class ApiService {
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
         await clearAutoLogin();
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          for (final k in _deviceDataKeysOnDelete) {
+            await prefs.remove(k);
+          }
+        } catch (e) {
+          print('[API] 탈퇴 후 기기 데이터 삭제 오류: $e');
+        }
         return {'success': true};
       }
       return {'success': false, 'message': data['message'] ?? '계정 삭제에 실패했습니다.'};
@@ -470,10 +493,16 @@ class ApiService {
   
   Future<Map<String, dynamic>> logout() async {
     try {
+      // 이 기기의 FCM 토큰을 함께 보내 서버 등록을 해제 (로그아웃 후 이전 계정 푸시가 계속 오던 문제, 2026-09-11)
+      final fcm = FCMService().fcmToken;
       final response = await http.post(
         Uri.parse('$baseUrl/api/user/auth/logout'),
-        headers: {'Authorization': 'Bearer $_token'},
-      );
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({if (fcm != null && fcm.isNotEmpty) 'fcm_token': fcm}),
+      ).timeout(const Duration(seconds: 10));
 
       // 모든 인증 정보 삭제 (SharedPreferences + 메모리 토큰)
       await clearAutoLogin();
@@ -484,6 +513,8 @@ class ApiService {
         return {'success': false, 'message': '로그아웃 실패'};
       }
     } catch (e) {
+      // 서버에 닿지 못해도 기기에서는 로그아웃 처리 (오프라인·타임아웃 — 2026-09-11)
+      await clearAutoLogin();
       return {'success': false, 'message': '서버 연결 오류'};
     }
   }

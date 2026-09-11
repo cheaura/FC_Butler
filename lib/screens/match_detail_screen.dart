@@ -5,6 +5,7 @@ import 'training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../widgets/badges.dart';
+import '../widgets/face_image.dart';
 import '../widgets/pill_tabs.dart';
 import '../widgets/pitch_field.dart';
 import '../widgets/player_field_card.dart';
@@ -461,6 +462,20 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     );
   }
 
+  /// 경기 포지션 기준 OVR = eachOvr[position] + 강화 보너스 + 적응도 Lv.5
+  /// (검색탭 스쿼드 세그 _squadOvr와 같은 식 — 화면 간 수치 일관성. 팀컬러 미반영, 교체 명단(28~)은 null)
+  static int? _matchOvr(dynamic p) {
+    final eo = (p['each_ovr'] ?? p['eachOvr'])?.toString() ?? '';
+    if (eo.isEmpty) return null;
+    final vals = eo.split(',');
+    final pos = (p['position'] as num? ?? 28).toInt();
+    if (pos >= vals.length) return null;
+    final base = int.tryParse(vals[pos].trim()) ?? 0;
+    if (base == 0) return null;
+    final grade = (p['grade'] as num? ?? 1).toInt();
+    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0);
+  }
+
   Widget _fieldView(List<dynamic> players) {
     // 평점 최고/최저 선수 판정 (배지 색이 아이콘 역할 — 최고 금색+★, 최저 로즈+▽)
     num? maxRating;
@@ -480,23 +495,27 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
           final w = constraints.maxWidth;
           final h = constraints.maxHeight;
           final cardW = w / 5.2;
+          // 겹침 방지 공용 배치 (같은 줄 자동 분산 — ST·CF 등, 2026-09-11)
+          final coords = layoutRoleCoords([
+            for (final p in players)
+              kSpposRole[(p['position'] as num?)?.toInt() ?? 14] ?? 'cm'
+          ]);
           // 축구장 배경(시안 A) 공용 위젯 (2026-09-07)
           return PitchField(
             child: Stack(
               children: [
-                for (final p in players)
+                for (var i = 0; i < players.length; i++)
                   Builder(builder: (context) {
+                    final p = players[i];
                     final pos = (p['position'] as num?)?.toInt() ?? 14;
-                    final role = kSpposRole[pos] ?? 'cm';
-                    final coord = kRoleCoord[role] ?? const [50, 40];
-                    final fx = coord[0] / 100.0;
-                    final fy = (85 - coord[1]) / 100.0;
+                    final fx = coords[i][0];
+                    final fy = coords[i][1];
                     final rating = p['status']?['spRating'] as num?;
                     return Positioned(
                       left: (w - cardW) * fx,
                       top: 8 + (h - cardW * 0.62 - 56) * fy,
                       // 공용 카드 (2026-08-19 재확정 배치):
-                      // 좌상 POS·아래 신규특성 / 좌하 시즌·우하 강화 / 평점=선수명 아래 알약
+                      // 좌상 POS·아래 신규특성 / 우상 OVR·아래 급여 / 좌하 시즌·우하 강화 / 평점=선수명 아래 알약
                       child: PlayerFieldCard(
                         cardW: cardW,
                         spPos: pos,
@@ -504,6 +523,9 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                         faceUrl: p['face_url']?.toString(),
                         name: '${p['name']}',
                         grade: (p['grade'] as num?)?.toInt() ?? 1,
+                        // OVR·급여: 서버가 경기 상세에 마스터DB 메타(each_ovr·pay)를 동봉 (2026-09-11)
+                        ovr: _matchOvr(p),
+                        pay: p['pay'] as num?,
                         rating: rating,
                         isBestRating: rating != null && rating == maxRating,
                         isWorstRating:
@@ -545,12 +567,12 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       dense: compact,
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: ClipOval(
-        child: Image.network(
-          p['face_url'] ?? '',
+        child: FaceImage(
+          url: p['face_url']?.toString(),
+          spid: p['spid'] as num?,
           width: 38,
           height: 38,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) => const Icon(Icons.person, size: 38),
+          fallback: const Icon(Icons.person, size: 38),
         ),
       ),
       title: Row(
@@ -673,13 +695,12 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
             Row(
               children: [
                 ClipOval(
-                  child: Image.network(
-                    p['face_url'] ?? '',
+                  child: FaceImage(
+                    url: p['face_url']?.toString(),
+                    spid: p['spid'] as num?,
                     width: 52,
                     height: 52,
-                    fit: BoxFit.cover,
-                    errorBuilder: (c, e, s) =>
-                        const Icon(Icons.person, size: 52),
+                    fallback: const Icon(Icons.person, size: 52),
                   ),
                 ),
                 const SizedBox(width: 12),
