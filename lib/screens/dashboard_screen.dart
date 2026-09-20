@@ -885,7 +885,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 _buildInfoItem(Icons.emoji_events, '티어', tier),
                 _buildInfoItem(Icons.star, '점수', _formatNumber(score)),
                 _buildInfoItem(Icons.leaderboard, '순위', _formatNumber(rank)),
-                _buildInfoItem(Icons.monetization_on, 'FC', '$fcTotal FC'),
+                _buildInfoItem(Icons.monetization_on, 'FC', '${_formatNumber(fcTotal)} FC'),
                 _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore), subtitle: highestScoreTime.isNotEmpty ? highestScoreTime : null),
                 if (account['protection_status'] != null && account['protection_status'].toString().isNotEmpty)
                   _buildInfoItem(
@@ -2052,7 +2052,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                             left: xPos - 15,
                             top: yPos - 25,
                             child: Text(
-                              value.toString(),
+                              _formatNumber(value.toString()),
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,

@@ -91,6 +91,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Icons.schedule;
       case 'status_offline':
         return Icons.offline_bolt;
+      case 'nickname_changed': // 매연 감독명 변경 감지 (2026-09-14)
+        return Icons.drive_file_rename_outline;
+      case 'smoke_candidates': // 매연 후보 신규 감지
+        return Icons.person_search;
+      case 'smoke_job_failed': // 랭킹 갱신 연속 실패
+        return Icons.sync_problem;
       default:
         return Icons.notifications;
     }
@@ -111,6 +117,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       case 'no_response':
       case 'status_offline':
         return Colors.red;
+      case 'nickname_changed': // 매연 감독명 변경 감지 (2026-09-14)
+        return Colors.deepOrange;
+      case 'smoke_candidates':
+        return Colors.teal;
+      case 'smoke_job_failed':
+        return Colors.brown;
       default:
         return Colors.grey;
     }

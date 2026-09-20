@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
+import '../services/squad_tc_bonus.dart';
 import '../widgets/badges.dart';
 import '../widgets/face_image.dart';
 import '../widgets/pill_tabs.dart';
@@ -89,6 +90,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       if (response.statusCode == 200 && data['success'] == true) {
         setState(() => _data = data);
         _loadTeamInfo();
+        _loadTcBonus();
       } else {
         setState(() => _error = data['message'] ?? '경기 상세 조회에 실패했습니다.');
       }
@@ -462,9 +464,31 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     );
   }
 
-  /// 경기 포지션 기준 OVR = eachOvr[position] + 강화 보너스 + 적응도 Lv.5
-  /// (검색탭 스쿼드 세그 _squadOvr와 같은 식 — 화면 간 수치 일관성. 팀컬러 미반영, 교체 명단(28~)은 null)
-  static int? _matchOvr(dynamic p) {
+  /// 팀컬러 계산 입력 (선발만 — 교체 명단 28~ 제외). 스쿼드 탭과 같은 넥슨 계산기 경유 (2026-09-20)
+  static List<SquadTcPlayer> _tcPlayersOf(List<dynamic> players) => [
+        for (final p in players)
+          if (p is Map && p['spid'] is num && ((p['position'] as num?) ?? 28) < 28)
+            SquadTcPlayer(
+              spid: (p['spid'] as num).toInt(),
+              grade: (p['grade'] as num? ?? 1).toInt(),
+              spPos: (p['position'] as num).toInt(),
+              name: '${p['name'] ?? ''}',
+            ),
+      ];
+
+  /// 양팀 선발의 팀컬러 보너스 확보 → 도착하면 OVR 다시 그림 (실패 시 팀컬러 미반영 값 유지)
+  Future<void> _loadTcBonus() async {
+    await Future.wait([_me, _opp].map((side) async {
+      final r = await SquadTcBonus.ensure(_tcPlayersOf(side['players'] as List? ?? const []),
+          formation: side['formation']?.toString());
+      if (r != null && mounted) setState(() {});
+    }));
+  }
+
+  /// 경기 포지션 기준 OVR = eachOvr[position] + 강화 보너스 + 적응도 Lv.5 + 팀컬러 '전체 능력치'
+  /// (검색탭 스쿼드 세그 _squadOvr·스쿼드 탭과 같은 식 — 화면 간 수치 일관성. 교체 명단(28~)은 null)
+  /// [tcBonus]가 아직 없으면(계산 전·실패) 팀컬러 미반영 값.
+  static int? _matchOvr(dynamic p, {Map<int, int>? tcBonus}) {
     final eo = (p['each_ovr'] ?? p['eachOvr'])?.toString() ?? '';
     if (eo.isEmpty) return null;
     final vals = eo.split(',');
@@ -473,7 +497,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
     final base = int.tryParse(vals[pos].trim()) ?? 0;
     if (base == 0) return null;
     final grade = (p['grade'] as num? ?? 1).toInt();
-    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0);
+    final tc = tcBonus?[(p['spid'] as num?)?.toInt()] ?? 0;
+    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0) + tc;
   }
 
   Widget _fieldView(List<dynamic> players) {
@@ -487,6 +512,8 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
       if (minRating == null || r < minRating) minRating = r;
     }
     final distinct = maxRating != null && maxRating != minRating;
+    // 팀컬러 보너스 (계산 도착 전에는 null → 미반영 값으로 먼저 표시)
+    final tcBonus = SquadTcBonus.cached(_tcPlayersOf(players));
 
     return AspectRatio(
       aspectRatio: 0.72,
@@ -524,7 +551,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                         name: '${p['name']}',
                         grade: (p['grade'] as num?)?.toInt() ?? 1,
                         // OVR·급여: 서버가 경기 상세에 마스터DB 메타(each_ovr·pay)를 동봉 (2026-09-11)
-                        ovr: _matchOvr(p),
+                        ovr: _matchOvr(p, tcBonus: tcBonus),
                         pay: p['pay'] as num?,
                         rating: rating,
                         isBestRating: rating != null && rating == maxRating,

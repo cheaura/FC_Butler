@@ -7,6 +7,7 @@ import '../constants/positions.dart';
 import '../services/api_service.dart';
 import '../services/recent_search_store.dart';
 import '../services/player_meta_store.dart';
+import '../services/squad_tc_bonus.dart';
 import '../screens/match_detail_screen.dart';
 import '../utils/fc_format.dart';
 import '../utils/tier_names.dart';
@@ -938,7 +939,7 @@ class _SearchTabState extends State<SearchTab>
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text('${m['total_fc'] ?? 0}',
+            Text(fmtThousands(m['total_fc'] ?? 0),
                 style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.w800,
@@ -965,7 +966,7 @@ class _SearchTabState extends State<SearchTab>
                 // 7일 선택 시 1일 평균 (오늘 포함 최근 7일 ÷ 7 — 2안: 우측 요약 열)
                 if (_miningPeriod == 1)
                   Text(
-                      '일평균 ${((m['total_fc'] as num? ?? 0) / 7).round()} FC',
+                      '일평균 ${fmtThousands(((m['total_fc'] as num? ?? 0) / 7).round())} FC',
                       style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w700,
@@ -990,7 +991,7 @@ class _SearchTabState extends State<SearchTab>
                 Text('${b['wins']}승 × ${b['rate']}FC',
                     style: TextStyle(fontSize: 12, color: _subColor)),
                 const SizedBox(width: 8),
-                Text('${b['fc']}FC',
+                Text('${fmtThousands(b['fc'])}FC',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -1050,7 +1051,10 @@ class _SearchTabState extends State<SearchTab>
             _squad!['success'] != true) {
           setState(() => _squad = parsed);
         }
-        if (parsed['success'] == true) _ensureSquadMeta(parsed);
+        if (parsed['success'] == true) {
+          _ensureSquadMeta(parsed);
+          _ensureSquadTc(parsed);
+        }
       }
     } catch (e) {
       print('[SearchTab] 스쿼드 로드 실패: $e');
@@ -1095,8 +1099,29 @@ class _SearchTabState extends State<SearchTab>
   static String _hhmm(DateTime t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
-  /// 슬롯 포지션 기준 OVR = eachOvr[포지션] + 강화 보너스 + 적응도 Lv.5 (스쿼드 탭과 같은 식, 팀컬러 미반영)
-  static int? _squadOvr(Map<String, dynamic> p) {
+  /// 팀컬러 계산 입력 (선발 11명) — 스쿼드 탭과 같은 넥슨 계산기 경유 (2026-09-20)
+  static List<SquadTcPlayer> _squadTcPlayers(List<Map<String, dynamic>> players) => [
+        for (final p in players)
+          if (p['spid'] is num)
+            SquadTcPlayer(
+              spid: (p['spid'] as num).toInt(),
+              grade: (p['grade'] as num? ?? 1).toInt(),
+              spPos: (p['sp_position'] as num? ?? 0).toInt(),
+              name: '${p['name'] ?? ''}',
+            ),
+      ];
+
+  /// 선발 11명의 팀컬러 보너스 확보 → 도착하면 OVR 다시 그림 (실패 시 팀컬러 미반영 값 유지)
+  Future<void> _ensureSquadTc(Map<String, dynamic> squad) async {
+    final players =
+        (squad['players'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    final r = await SquadTcBonus.ensure(_squadTcPlayers(players), formation: squad['formation5']?.toString());
+    if (r != null && mounted) setState(() {});
+  }
+
+  /// 슬롯 포지션 기준 OVR = eachOvr[포지션] + 강화 보너스 + 적응도 Lv.5 + 팀컬러 '전체 능력치' (스쿼드 탭과 같은 식)
+  /// [tcBonus]가 아직 없으면(계산 전·실패) 팀컬러 미반영 값.
+  static int? _squadOvr(Map<String, dynamic> p, {Map<int, int>? tcBonus}) {
     final eo = (p['each_ovr'] ?? p['eachOvr'])?.toString() ?? '';
     if (eo.isEmpty) return null;
     final vals = eo.split(',');
@@ -1105,7 +1130,8 @@ class _SearchTabState extends State<SearchTab>
     final base = int.tryParse(vals[pos].trim()) ?? 0;
     if (base == 0) return null;
     final grade = (p['grade'] as num? ?? 1).toInt();
-    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0);
+    final tc = tcBonus?[(p['spid'] as num?)?.toInt()] ?? 0;
+    return base + (kGradeBonus[grade] ?? 0) + (kAdapBonus[5] ?? 0) + tc;
   }
 
   /// 강화 단계 시세 (메타 저장소의 30분 이내 시세만)
@@ -1238,6 +1264,8 @@ class _SearchTabState extends State<SearchTab>
   }
 
   Widget _squadFieldView(List<Map<String, dynamic>> players) {
+    // 팀컬러 보너스 (계산 도착 전에는 null → 미반영 값으로 먼저 표시)
+    final tcBonus = SquadTcBonus.cached(_squadTcPlayers(players));
     return AspectRatio(
       aspectRatio: 0.75,
       child: LayoutBuilder(
@@ -1280,7 +1308,7 @@ class _SearchTabState extends State<SearchTab>
                         name: '${p['name']}',
                         grade: (p['grade'] as num? ?? 1).toInt(),
                         // 우상 OVR·급여 육각 — 스쿼드 탭과 같은 자리 (2026-09-07)
-                        ovr: _squadOvr(p),
+                        ovr: _squadOvr(p, tcBonus: tcBonus),
                         pay: p['pay'],
                         seasonFallback: p['season']?.toString(),
                         // 카드 탭 → 집훈 계산기 (2026-08-22)

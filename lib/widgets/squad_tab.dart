@@ -292,6 +292,37 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         overflow: TextOverflow.ellipsis);
   }
 
+  /// 선수 목록 행의 신규특성 아이콘 — 시즌 배지 바로 오른쪽 (검색·시즌 카드·랭커픽 공통, 2026-09-20 사용자 지정 위치).
+  /// 신규특성은 시즌 카드(spid)마다 다르므로 카드 단위로 표시. 미조회·없음이면 아무것도 그리지 않는다.
+  /// 특성 이름은 아이콘을 길게 누르면 표시.
+  Widget _newTraitIcons(num? spid) {
+    final traits = PlayerMetaStore.cachedNewTraits(spid);
+    if (traits == null || traits.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final t in traits)
+            Padding(
+              padding: const EdgeInsets.only(right: 3),
+              child: Tooltip(
+                message: '신규특성: ${t['name'] ?? ''}',
+                // 넥슨 특성 아이콘은 밝은색이라 필드 카드와 같은 남색 바탕 위에 올린다
+                child: Container(
+                  padding: const EdgeInsets.all(1.5),
+                  decoration:
+                      BoxDecoration(color: const Color(0xE61F3A5C), borderRadius: BorderRadius.circular(4)),
+                  child: Image.network('${t['icon'] ?? ''}',
+                      width: 12, height: 12, errorBuilder: (c, e, s) => const SizedBox(width: 12, height: 12)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// 필터 토글 행 (검색·랭커픽 시트 공통)
   Widget _tcFilterRow(StateSetter setSheet) {
     return Row(
@@ -1508,8 +1539,18 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                         fallback: const Icon(Icons.person, size: 40),
                                       ),
                                     ),
-                                    title: Text('${p['name']}${dup ? ' (다른 자리 사용 중)' : ''}',
-                                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                                    // 이 목록은 이름 줄에 시즌 배지가 없어 신규특성을 이름 바로 오른쪽에 둔다 (사용자 지정)
+                                    title: Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text('${p['name']}${dup ? ' (다른 자리 사용 중)' : ''}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                                        ),
+                                        _newTraitIcons(p['spid'] as num?),
+                                      ],
+                                    ),
                                     subtitle: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
@@ -1585,6 +1626,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           ),
           const SizedBox(width: 6),
           SeasonBadge(spid: p['spid'] as num?, height: 13, fallbackText: p['season']?.toString()),
+          _newTraitIcons(p['spid'] as num?),
         ],
       ),
       subtitle: Column(
@@ -1629,6 +1671,13 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                 variants = v;
                 variantsLoading = false;
               });
+              // 시즌 카드별 신규특성·팀컬러 메타를 묶음 1회로 확보 (신규특성은 카드마다 다름, 2026-09-20)
+              final ids = v.map((c) => c['spid'] as num?).whereType<num>().toList();
+              if (ids.isNotEmpty) {
+                PlayerMetaStore.ensureAll(ids).then((_) {
+                  if (context.mounted) setSheet(() {});
+                });
+              }
             });
           }
 

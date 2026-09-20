@@ -6,6 +6,14 @@ String fmtFormation(dynamic form) {
   return form.toString().split('-').where((x) => x.isNotEmpty && x != '0').join('-');
 }
 
+/// 천 단위 쉼표 (FC 채굴량 등 정수 표기, 2026-09-20). 숫자가 아니면 원문 그대로.
+String fmtThousands(dynamic v) {
+  final n = v is num ? v.round() : int.tryParse('${v ?? ''}');
+  if (n == null) return '${v ?? '-'}';
+  final s = n.abs().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+  return n < 0 ? '-$s' : s;
+}
+
 /// FC온라인 BP 금액 표기 (경/조/억 단위 축약)
 String formatBp(num? v) {
   if (v == null) return '-';
