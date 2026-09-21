@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
+import '../models/foot_stat.dart';
 import 'api_service.dart';
 
 /// 선수 카드(spid) 메타·특성 기기 영구 캐시 — 스쿼드 B안 5단계 (2026-08-22).
@@ -80,7 +81,14 @@ class PlayerMetaStore {
     return pa is num ? (pa * 1000).toInt() : now.millisecondsSinceEpoch;
   }
 
-  static bool _complete(Map<String, dynamic> m) => (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List;
+  /// 캐시 항목이 완성됐는지 — 미완성이면 서버에 다시 요청한다.
+  /// 2026-09-21: 양발(`foot`) 키가 없는 기존 캐시도 미완성으로 봐 1회 재요청 (사용자 선택).
+  /// 서버가 값을 못 준 카드는 `foot: null`로 저장해(키는 있음) 반복 요청을 막는다.
+  static bool isComplete(Map<String, dynamic> m) =>
+      (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List && m.containsKey('foot');
+
+  /// 캐시된 양발 스탯. 미조회·값 없음이면 null.
+  static FootStat? cachedFoot(num? spid) => FootStat.fromJson(cached(spid)?['foot']);
 
   /// 여러 spid를 한 번에 확보 (DB → 서버 묶음). 완료 후 cached()로 접근.
   /// [freshPrice]면 30분 지난 시세를 서버에 다시 요청한다.
@@ -98,7 +106,7 @@ class PlayerMetaStore {
       final stale = m == null ||
           at == null ||
           now.difference(at) > _maxAge ||
-          !_complete(m) ||
+          !isComplete(m) ||
           (freshPrice && priceStale(id));
       if (stale) need.add(id);
     }
@@ -138,7 +146,7 @@ class PlayerMetaStore {
   static Future<void> ensure(num? spid) {
     if (spid == null) return Future.value();
     final id = spid.toInt();
-    if (_mem[id] != null && _complete(_mem[id]!)) return Future.value();
+    if (_mem[id] != null && isComplete(_mem[id]!)) return Future.value();
     _queue.add(id);
     _queueDone ??= Completer<void>();
     final done = _queueDone!;
@@ -202,6 +210,8 @@ class PlayerMetaStore {
           // 서버가 만료 시세(price_stale)를 기준 시각(price_at)과 함께 내려주면 그 시각을 그대로 기록
           m['_price_at'] = _priceAtMsOf(m, now);
         }
+        // 양발(foot): 서버가 못 준 카드는 null로 기록해 '조회했음'을 남긴다 (isComplete 반복 요청 방지)
+        if (!m.containsKey('foot')) m['foot'] = null;
         _mem[spid] = m;
         _memAt[spid] = now;
         batch.insert('player_meta', {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
@@ -238,6 +248,8 @@ class PlayerMetaStore {
         'position': p['position'],
         'traits': p['traits'],
         'teamcolors': p['teamcolors'] ?? [],
+        // 양발은 동봉 응답에 있을 때만 (없으면 키를 비워 두어 player-bulk 재요청으로 채움)
+        if (p.containsKey('foot')) 'foot': p['foot'],
       };
       _mem[spid] = m;
       _memAt[spid] = now;

@@ -18,6 +18,7 @@ import '../services/ovr_formula.dart';
 import '../utils/fc_format.dart';
 import 'badges.dart';
 import 'face_image.dart';
+import 'foot_badge.dart';
 import 'pill_tabs.dart';
 import 'pitch_field.dart';
 import 'player_field_card.dart';
@@ -294,7 +295,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
 
   /// 선수 목록 행의 신규특성 아이콘 — 시즌 배지 바로 오른쪽 (검색·시즌 카드·랭커픽 공통, 2026-09-20 사용자 지정 위치).
   /// 신규특성은 시즌 카드(spid)마다 다르므로 카드 단위로 표시. 미조회·없음이면 아무것도 그리지 않는다.
-  /// 특성 이름은 아이콘을 길게 누르면 표시.
+  /// 특성 이름은 아이콘을 길게 누르면 표시. 아이콘 12→14px (2026-09-21 사용자 선택, 안쪽 여백·남색 바탕 유지).
   Widget _newTraitIcons(num? spid) {
     final traits = PlayerMetaStore.cachedNewTraits(spid);
     if (traits == null || traits.isEmpty) return const SizedBox.shrink();
@@ -314,7 +315,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   decoration:
                       BoxDecoration(color: const Color(0xE61F3A5C), borderRadius: BorderRadius.circular(4)),
                   child: Image.network('${t['icon'] ?? ''}',
-                      width: 12, height: 12, errorBuilder: (c, e, s) => const SizedBox(width: 12, height: 12)),
+                      width: 14, height: 14, errorBuilder: (c, e, s) => const SizedBox(width: 14, height: 14)),
                 ),
               ),
             ),
@@ -322,6 +323,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
+
+  /// 선수 목록 행의 양발 스탯 — 신규특성 아이콘 바로 오른쪽 (2026-09-21, 축약 'L5 R4' 주발 굵게). 미조회면 표시 없음.
+  Widget _footBadge(num? spid) => FootBadge(foot: PlayerMetaStore.cachedFoot(spid));
 
   /// 필터 토글 행 (검색·랭커픽 시트 공통)
   Widget _tcFilterRow(StateSetter setSheet) {
@@ -1549,6 +1553,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                                         ),
                                         _newTraitIcons(p['spid'] as num?),
+                                        _footBadge(p['spid'] as num?),
                                       ],
                                     ),
                                     subtitle: Column(
@@ -1627,6 +1632,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
           const SizedBox(width: 6),
           SeasonBadge(spid: p['spid'] as num?, height: 13, fallbackText: p['season']?.toString()),
           _newTraitIcons(p['spid'] as num?),
+          _footBadge(p['spid'] as num?),
         ],
       ),
       subtitle: Column(
