@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 import '../models/foot_stat.dart';
+import '../models/work_rate.dart';
 import 'api_service.dart';
 
 /// 선수 카드(spid) 메타·특성 기기 영구 캐시 — 스쿼드 B안 5단계 (2026-08-22).
@@ -17,6 +18,8 @@ class PlayerMetaStore {
 
   static const _maxAge = Duration(days: 90);
   static const _priceMaxAge = Duration(minutes: 30);
+  // 참여도(workrate)는 서버 수집이 진행 중이라 없는 카드는 하루 1회만 다시 확인 (2026-09-28)
+  static const _wrRecheck = Duration(days: 1);
 
   static Database? _db;
   static final Map<int, Map<String, dynamic>> _mem = {}; // 프로세스 메모리 캐시
@@ -84,11 +87,24 @@ class PlayerMetaStore {
   /// 캐시 항목이 완성됐는지 — 미완성이면 서버에 다시 요청한다.
   /// 2026-09-21: 양발(`foot`) 키가 없는 기존 캐시도 미완성으로 봐 1회 재요청 (사용자 선택).
   /// 서버가 값을 못 준 카드는 `foot: null`로 저장해(키는 있음) 반복 요청을 막는다.
+  /// 2026-09-28: 참여도(`workrate`)가 없으면 마지막 확인(`_wr_at`)이 하루 지났을 때만 미완성으로 본다
+  /// (수집 전 캐시된 카드가 90일 동안 참여도 없이 남지 않게 + 수집 안 된 카드의 반복 요청 방지).
   static bool isComplete(Map<String, dynamic> m) =>
-      (m['each_ovr']?.toString() ?? '').isNotEmpty && m['traits'] is List && m.containsKey('foot');
+      (m['each_ovr']?.toString() ?? '').isNotEmpty &&
+      m['traits'] is List &&
+      m.containsKey('foot') &&
+      (m['workrate'] != null || _wrCheckedRecently(m));
+
+  static bool _wrCheckedRecently(Map<String, dynamic> m) {
+    final at = m['_wr_at'];
+    return at is int && DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(at)) < _wrRecheck;
+  }
 
   /// 캐시된 양발 스탯. 미조회·값 없음이면 null.
   static FootStat? cachedFoot(num? spid) => FootStat.fromJson(cached(spid)?['foot']);
+
+  /// 캐시된 공격/수비 참여도. 미조회·아직 수집 안 됨이면 null.
+  static WorkRate? cachedWorkRate(num? spid) => WorkRate.fromJson(cached(spid)?['workrate']);
 
   /// 여러 spid를 한 번에 확보 (DB → 서버 묶음). 완료 후 cached()로 접근.
   /// [freshPrice]면 30분 지난 시세를 서버에 다시 요청한다.
@@ -212,6 +228,9 @@ class PlayerMetaStore {
         }
         // 양발(foot): 서버가 못 준 카드는 null로 기록해 '조회했음'을 남긴다 (isComplete 반복 요청 방지)
         if (!m.containsKey('foot')) m['foot'] = null;
+        // 참여도: 없으면 null + 확인 시각 기록 → 하루 뒤에만 다시 물어봄
+        if (!m.containsKey('workrate')) m['workrate'] = null;
+        m['_wr_at'] = now.millisecondsSinceEpoch;
         _mem[spid] = m;
         _memAt[spid] = now;
         batch.insert('player_meta', {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
@@ -250,6 +269,9 @@ class PlayerMetaStore {
         'teamcolors': p['teamcolors'] ?? [],
         // 양발은 동봉 응답에 있을 때만 (없으면 키를 비워 두어 player-bulk 재요청으로 채움)
         if (p.containsKey('foot')) 'foot': p['foot'],
+        // 참여도도 동봉 응답에 있을 때만 (없으면 _wr_at이 없어 player-bulk로 1회 확인)
+        if (p['workrate'] != null) 'workrate': p['workrate'],
+        if (p['workrate'] != null) '_wr_at': now.millisecondsSinceEpoch,
       };
       _mem[spid] = m;
       _memAt[spid] = now;

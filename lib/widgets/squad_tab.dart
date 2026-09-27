@@ -324,8 +324,9 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     );
   }
 
-  /// 선수 목록 행의 양발 스탯 — 신규특성 아이콘 바로 오른쪽 (2026-09-21, 축약 'L5 R4' 주발 굵게). 미조회면 표시 없음.
-  Widget _footBadge(num? spid) => FootBadge(foot: PlayerMetaStore.cachedFoot(spid));
+  /// 선수 목록 행의 양발 + 참여도 — 신규특성 아이콘 바로 오른쪽 (2026-09-28: 'L5 R4' 글자 → 발 모양, 오른쪽 참여도). 미조회면 표시 없음.
+  Widget _footBadge(num? spid) =>
+      FootBadge(foot: PlayerMetaStore.cachedFoot(spid), workrate: PlayerMetaStore.cachedWorkRate(spid));
 
   /// 필터 토글 행 (검색·랭커픽 시트 공통)
   Widget _tcFilterRow(StateSetter setSheet) {
@@ -1726,6 +1727,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                               ),
                               const SizedBox(width: 6),
                               SeasonBadge(spid: p['spid'] as num?, height: 14, fallbackText: p['season']?.toString()),
+                              // 양발 + 참여도 (편집 시트 — 2026-09-28)
+                              _footBadge(p['spid'] as num?),
                             ],
                           ),
                           Text(
@@ -2738,7 +2741,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                       final fy = coords[i][1];
                       return Positioned(
                         left: (w - cardW) * fx,
-                        top: 8 + (h - cardW * 0.62 - 58) * fy,
+                        top: 8 + (h - cardW * 0.62 - 58 - kWorkRateRowH) * fy,   // 참여도 줄만큼 여유 (09-28)
                         child: _draggableSlot(i, cardW),
                       );
                     }),

@@ -4,9 +4,11 @@ import 'package:http/http.dart' as http;
 import 'training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
+import '../services/player_meta_store.dart';
 import '../services/squad_tc_bonus.dart';
 import '../widgets/badges.dart';
 import '../widgets/face_image.dart';
+import '../widgets/foot_badge.dart';
 import '../widgets/pill_tabs.dart';
 import '../widgets/pitch_field.dart';
 import '../widgets/player_field_card.dart';
@@ -540,7 +542,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                     final rating = p['status']?['spRating'] as num?;
                     return Positioned(
                       left: (w - cardW) * fx,
-                      top: 8 + (h - cardW * 0.62 - 56) * fy,
+                      top: 8 + (h - cardW * 0.62 - 56 - kWorkRateRowH) * fy,   // 참여도 줄만큼 여유 (09-28)
                       // 공용 카드 (2026-08-19 재확정 배치):
                       // 좌상 POS·아래 신규특성 / 우상 OVR·아래 급여 / 좌하 시즌·우하 강화 / 평점=선수명 아래 알약
                       child: PlayerFieldCard(
@@ -548,7 +550,7 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                         spPos: pos,
                         spid: p['spid'] as num?,
                         faceUrl: p['face_url']?.toString(),
-                        name: '${p['name']}',
+                        name: fieldShortName('${p['name']}'),   // 성만 (이름 옆 발 자리, 09-28 a안)
                         grade: (p['grade'] as num?)?.toInt() ?? 1,
                         // OVR·급여: 서버가 경기 상세에 마스터DB 메타(each_ovr·pay)를 동봉 (2026-09-11)
                         ovr: _matchOvr(p, tcBonus: tcBonus),
@@ -735,9 +737,21 @@ class _MatchDetailScreenState extends State<MatchDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${p['name']}',
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w800)),
+                      // 이름 + 양발·참여도 (2026-09-28)
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text('${p['name']}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 18, fontWeight: FontWeight.w800)),
+                          ),
+                          FootBadge(
+                              foot: PlayerMetaStore.cachedFoot(p['spid'] as num?),
+                              workrate: PlayerMetaStore.cachedWorkRate(p['spid'] as num?)),
+                        ],
+                      ),
                       Row(
                         children: [
                           SeasonBadge(

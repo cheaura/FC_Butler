@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../providers/theme_provider.dart';
 import '../constants/positions.dart';
 import '../services/trait_store.dart';
 import '../services/player_meta_store.dart';
 import 'badges.dart';
 import 'face_image.dart';
+import 'foot_badge.dart';
 
 /// 필드 선수 카드 — 3화면(스쿼드 탭·검색 스쿼드 세그·경기 상세) 공용.
 ///
@@ -14,6 +14,17 @@ import 'face_image.dart';
 ///   좌하 = 시즌 · 우하 = 강화
 /// 선수명 아래: 경기 분석=평점 알약([rating] 전달 시 자동), 스쿼드 탭=시세([footerLines]).
 /// 평점 최고 = 금색+★, 최저 = 로즈+▽ (배지 색이 아이콘 역할 — 기존 확정 유지).
+/// 2026-09-28: 얼굴 원 위 가운데 = 공격/수비 참여도(값 없어도 줄 높이 유지), 선수명 오른쪽 = 양발 발 모양.
+///   하단 중앙 팀컬러 개수 점은 사용자 요청으로 제거 (팀컬러는 카드를 누른 시트에서).
+///   세로가 [kWorkRateRowH]만큼 늘어나므로 피치 배치 여유를 그만큼 더 잡는다.
+const double kWorkRateRowH = 12;
+
+/// 필드 카드용 성만 남기기 ("킬리안 음바페" → "음바페") — 이름 옆 발 자리 확보 (2026-09-28 a안: 검색 탭·경기 상세)
+String fieldShortName(String? name) {
+  final parts = (name ?? '').trim().split(' ');
+  return parts.isEmpty ? '' : parts.last;
+}
+
 class PlayerFieldCard extends StatefulWidget {
   final double cardW;
   final int spPos;
@@ -69,7 +80,9 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
 
   void _ensureTraits() {
     if (widget.empty || widget.spid == null) return;
-    if (TraitStore.cached(widget.spid) == null) {
+    // 특성뿐 아니라 양발·참여도까지 갖춰졌는지로 판단 (참여도 없는 카드는 하루 1회만 재확인 — PlayerMetaStore)
+    final m = PlayerMetaStore.cached(widget.spid);
+    if (TraitStore.cached(widget.spid) == null || m == null || !PlayerMetaStore.isComplete(m)) {
       TraitStore.ensure(widget.spid).then((_) {
         if (mounted) setState(() {});
       });
@@ -140,9 +153,8 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
     final avatarSize = widget.cardW * 0.60;
     final traits =
         widget.empty ? null : TraitStore.cached(widget.spid);
-    // 팀컬러 개수 점 (1.0.4, 2-A): 카드 하단 중앙. 내용은 카드를 눌렀을 때 시트에서.
-    final tcList = widget.empty ? null : PlayerMetaStore.cached(widget.spid)?['teamcolors'];
-    final tcCount = tcList is List ? tcList.length : 0;
+    final foot = widget.empty ? null : PlayerMetaStore.cachedFoot(widget.spid);
+    final workrate = widget.empty ? null : PlayerMetaStore.cachedWorkRate(widget.spid);
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -151,6 +163,13 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // 참여도 줄 (포지션·OVR 위 가운데) — 값이 없어도 높이를 비워 카드 높이 통일
+            SizedBox(
+              height: kWorkRateRowH,
+              child: workrate == null
+                  ? null
+                  : Align(alignment: Alignment.topCenter, child: WorkRateIcon(workrate: workrate, size: 9)),
+            ),
             Stack(
               clipBehavior: Clip.none,
               children: [
@@ -260,41 +279,30 @@ class _PlayerFieldCardState extends State<PlayerFieldCard> {
                     child:
                         GradeBadge(grade: widget.grade!, size: 13),
                   ),
-                // 하단 중앙: 팀컬러 개수 (1.0.4)
-                if (tcCount > 0)
-                  Positioned(
-                    bottom: -7,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
-                        decoration: BoxDecoration(
-                          color: PanenkaTokens.of(context).accentBand,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: Colors.black54, width: 0.8),
-                        ),
-                        child: Text('$tcCount',
-                            style: TextStyle(
-                                fontSize: 7,
-                                fontWeight: FontWeight.w800,
-                                color: panenkaOnFill(PanenkaTokens.of(context).accentBand),
-                                height: 1.2)),
-                      ),
-                    ),
-                  ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(
-              widget.empty ? '비어 있음' : widget.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  shadows: [Shadow(color: Colors.black87, blurRadius: 3)]),
+            // 선수명 + 오른쪽 양발 (이름은 줄임표로 줄고 발은 그대로)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.empty ? '비어 있음' : widget.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        shadows: [Shadow(color: Colors.black87, blurRadius: 3)]),
+                  ),
+                ),
+                if (foot != null) ...[
+                  const SizedBox(width: 2),
+                  FeetIcon(foot: foot, height: 14),   // 12px는 숫자가 작아 14px (09-28 웹 가독성 교훈)
+                ],
+              ],
             ),
             // 경기 분석: 평점 알약 (선수명 아래 — 사용자 확정)
             if (!widget.empty && widget.rating != null) _ratingPill(),

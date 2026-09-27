@@ -1325,14 +1325,14 @@ class _SearchTabState extends State<SearchTab>
                     // 좌상 POS·아래 신규특성 / 좌하 시즌·우하 강화 (카드 내부 처리)
                     return Positioned(
                       left: (w - cardW) * fx,
-                      top: 8 + (h - cardW * 0.62 - 50) * fy,
+                      top: 8 + (h - cardW * 0.62 - 50 - kWorkRateRowH) * fy,   // 참여도 줄만큼 여유 (09-28)
                       child: PlayerFieldCard(
                         cardW: cardW,
                         spPos: pos,
                         spid: spid,
                         // 서버가 동봉한 face_url 우선 (spid 규칙 주소는 CDN에 없는 카드가 있음, 2026-09-07)
                         faceUrl: faceUrl,
-                        name: '${p['name']}',
+                        name: fieldShortName('${p['name']}'),   // 성만 (이름 옆 발 자리, 09-28 a안)
                         grade: (p['grade'] as num? ?? 1).toInt(),
                         // 우상 OVR·급여 육각 — 스쿼드 탭과 같은 자리 (2026-09-07)
                         ovr: _squadOvr(p, tcBonus: tcBonus),
