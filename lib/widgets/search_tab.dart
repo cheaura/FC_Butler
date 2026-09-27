@@ -131,6 +131,10 @@ class _SearchTabState extends State<SearchTab>
     }
   }
 
+  /// lookup/manager 응답 기준 실존 감독 여부 (랭킹 안이거나, 랭킹 밖이지만 오픈API에 있음)
+  bool _exists(Map<String, dynamic>? res) =>
+      res != null && (res['found'] == true || res['api_found'] == true);
+
   Future<void> _search() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
@@ -156,13 +160,14 @@ class _SearchTabState extends State<SearchTab>
       final data = json.decode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
         setState(() => _result = data);
-        if (data['found'] == true) {
+        // 랭킹(10,000위) 밖이어도 오픈API에 있는 감독이면 실존 — 최근 검색 저장·전적 조회 (2026-09-27)
+        if (_exists(data)) {
           final list = await RecentSearchStore.add(
               name, _mode, Map<String, dynamic>.from(data['data'] ?? {}));
           if (mounted) setState(() => _recent = list);
         }
         // 전적은 감독모드/1vs1만 지원 (2vs2는 오픈API 미제공 — 웹과 동일)
-        if (data['found'] == true && _mode != '2vs2') {
+        if (_exists(data) && _mode != '2vs2') {
           _loadMatches();
         }
       } else {
@@ -333,7 +338,7 @@ class _SearchTabState extends State<SearchTab>
 
   // 당겨서 새로고침 — 현재 세그먼트의 데이터만 재조회 (로딩 정책 2026-08-19)
   Future<void> _refreshCurrent() async {
-    if (_result == null || _result!['found'] != true) {
+    if (!_exists(_result)) {
       await _loadClubs(); // 결과가 없으면 갱신할 데이터 없음 (클럽 목록만)
       return;
     }
@@ -497,7 +502,11 @@ class _SearchTabState extends State<SearchTab>
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text(
                 // 등급명은 저장된 텍스트 대신 아이콘 번호로 재계산 (옛 서버 표의 '월드클래스 N부' 오표기 교정)
-                '${tierLabel(r['tier'], r['tier_icon'])} · ${_modeLabels[r['mode']] ?? r['mode']}',
+                // 랭킹 밖 감독은 등급이 비어 있어 모드만 표시 (2026-09-27)
+                [
+                  tierLabel(r['tier'], r['tier_icon']),
+                  _modeLabels[r['mode']] ?? r['mode'] ?? '',
+                ].where((s) => s.toString().isNotEmpty).join(' · '),
                 style: TextStyle(fontSize: 12, color: _subColor)),
             trailing: IconButton(
               icon: Icon(Icons.close, size: 18, color: _subColor),
@@ -520,7 +529,8 @@ class _SearchTabState extends State<SearchTab>
   List<Widget> _buildResult() {
     final res = _result!;
     final dateInfo = res['date_info'] ?? '';
-    if (res['found'] != true) {
+    if (!_exists(res)) {
+      // 홈페이지 랭킹에도 오픈API에도 없음 (감독명 변경 직후엔 오픈API 이름 검색 반영이 늦음 — 2026-09-27 실측)
       return [
         Card(
           child: Padding(
@@ -533,21 +543,29 @@ class _SearchTabState extends State<SearchTab>
                     style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                const Text('랭킹 데이터에 없는 감독명입니다.'),
+                const Text('존재하지 않는 감독명입니다.'),
+                const SizedBox(height: 4),
+                Text('감독명을 변경한 지 얼마 되지 않았다면 잠시 후 다시 조회해 주세요.',
+                    style: TextStyle(fontSize: 12, color: _subColor)),
               ],
             ),
           ),
         ),
       ];
     }
+    // 랭킹(10,000위) 밖 실존 감독: 랭킹 항목만 비우고 전적·스쿼드·채굴은 오픈API로 그대로 표시
+    final ranked = res['found'] == true;
     final d = Map<String, dynamic>.from(res['data'] ?? {});
     final showMatches = _mode != '2vs2';
+    final modeLabel = _modeLabels[res['mode']] ?? '';
     return [
-      // 헤더: 티어 로고 + 이름
+      // 헤더: 티어 로고 + 이름 (랭킹 밖은 티어를 알 수 없어 로고·등급명 비움)
       Row(
         children: [
-          _tierLogo(d['tier_icon']?.toString(), size: 48),
-          const SizedBox(width: 10),
+          if (ranked) ...[
+            _tierLogo(d['tier_icon']?.toString(), size: 48),
+            const SizedBox(width: 10),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -557,7 +575,9 @@ class _SearchTabState extends State<SearchTab>
                         fontSize: 20, fontWeight: FontWeight.w800)),
                 Text(
                     // 등급명은 아이콘 번호로 재계산 (서버 옛 표의 마스터→'월드클래스 N부' 오표기 교정, 2026-09-11)
-                    '${tierLabel(d['tier'], d['tier_icon'])} · ${_modeLabels[res['mode']] ?? ''}',
+                    ranked
+                        ? '${tierLabel(d['tier'], d['tier_icon'])} · $modeLabel'
+                        : modeLabel,
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -611,6 +631,13 @@ class _SearchTabState extends State<SearchTab>
   List<Widget> _buildOverview(Map<String, dynamic> d) {
     final maxDiv = _result!['max_division'] as Map<String, dynamic>?;
     return [
+      if (_result!['found'] != true)
+        // 랭킹(10,000위) 밖 — 홈페이지 랭킹 항목은 가져올 수 없음
+        _sectionCard(title: '현재 랭킹', children: [
+          Text('랭킹 데이터가 없습니다.',
+              style: TextStyle(fontSize: 14, color: _subColor)),
+        ])
+      else
       _sectionCard(title: '현재 랭킹', children: [
         _kvRow('순위',
             d['rank']?.toString().isNotEmpty == true ? '${d['rank']}위' : '-'),
