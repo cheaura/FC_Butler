@@ -328,6 +328,73 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   Widget _footBadge(num? spid) =>
       FootBadge(foot: PlayerMetaStore.cachedFoot(spid), workrate: PlayerMetaStore.cachedWorkRate(spid));
 
+  /// 편집 시트 머리 오른쪽 공백의 프로필 — A안(사용자 확정 2026-09-28): 제목 없는 3줄
+  /// [국기 국적] / [엠블럼 소속팀] / [키 · 몸무게 · 체형]. 키·몸무게는 넥슨 검색 원본, 국적·소속팀·체형은 넥슨 선수 미리보기.
+  /// 값은 player-bulk 캐시 우선, 없으면 슬롯 선수 dict에 실려 온 필드. 없는 줄은 생략, 전부 없으면 표시 없음.
+  Widget _bodyStats(Map<String, dynamic> p) {
+    final spid = p['spid'] as num?;
+    final h = PlayerMetaStore.cachedHeight(spid) ?? num.tryParse('${p['height'] ?? ''}')?.toInt();
+    final w = PlayerMetaStore.cachedWeight(spid) ?? num.tryParse('${p['weight'] ?? ''}')?.toInt();
+    final nation = PlayerMetaStore.cachedNation(spid) ?? (p['nation'] is Map ? Map<String, dynamic>.from(p['nation']) : null);
+    final team = PlayerMetaStore.cachedTeam(spid) ?? (p['team'] is Map ? Map<String, dynamic>.from(p['team']) : null);
+    final body = PlayerMetaStore.cachedBodyType(spid) ?? p['body_type']?.toString();
+    final subStyle = TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: _subColor);
+    const valStyle = TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800);
+
+    // 아이콘 + 이름 한 줄 (국기 18×12 / 엠블럼 16×16). 이미지 실패 시 이름만.
+    Widget iconLine(String? url, String name, double iw, double ih) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (url != null && url.isNotEmpty) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: Image.network(url, width: iw, height: ih, fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) => const SizedBox.shrink()),
+              ),
+              const SizedBox(width: 5),
+            ],
+            Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: valStyle)),
+          ],
+        );
+
+    final lines = <Widget>[];
+    final nationName = nation?['name']?.toString() ?? '';
+    if (nationName.isNotEmpty) lines.add(iconLine(nation?['flag']?.toString(), nationName, 18, 12));
+    final teamName = team?['name']?.toString() ?? '';
+    if (teamName.isNotEmpty) lines.add(iconLine(team?['crest']?.toString(), teamName, 16, 16));
+    final parts = <InlineSpan>[];
+    void addPart(List<InlineSpan> spans) {
+      if (parts.isNotEmpty) parts.add(TextSpan(text: ' · ', style: subStyle.copyWith(fontSize: 12)));
+      parts.addAll(spans);
+    }
+    if (h != null) addPart([TextSpan(text: '$h', style: valStyle), TextSpan(text: 'cm', style: subStyle)]);
+    if (w != null) addPart([TextSpan(text: '$w', style: valStyle), TextSpan(text: 'kg', style: subStyle)]);
+    if (body != null && body.isNotEmpty) addPart([TextSpan(text: body, style: valStyle)]);
+    if (parts.isNotEmpty) {
+      lines.add(Text.rich(TextSpan(children: parts), maxLines: 1, overflow: TextOverflow.ellipsis));
+    }
+    if (lines.isEmpty) return const SizedBox.shrink();
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.42),
+      child: Container(
+        margin: const EdgeInsets.only(left: 8),
+        padding: const EdgeInsets.only(left: 10),
+        decoration: BoxDecoration(border: Border(left: BorderSide(color: _subColor.withOpacity(.35)))),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (var i = 0; i < lines.length; i++) ...[
+              if (i > 0) const SizedBox(height: 4),
+              lines[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 필터 토글 행 (검색·랭커픽 시트 공통)
   Widget _tcFilterRow(StateSetter setSheet) {
     return Row(
@@ -1727,7 +1794,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                               ),
                               const SizedBox(width: 6),
                               SeasonBadge(spid: p['spid'] as num?, height: 14, fallbackText: p['season']?.toString()),
-                              // 양발 + 참여도 (편집 시트 — 2026-09-28)
+                              // 신규특성 → 양발 + 참여도 (편집 시트 — 목록 행과 같은 순서, 2026-09-28)
+                              _newTraitIcons(p['spid'] as num?),
                               _footBadge(p['spid'] as num?),
                             ],
                           ),
@@ -1741,6 +1809,8 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                         ],
                       ),
                     ),
+                    // 오른쪽 공백에 키·몸무게 (2026-09-28)
+                    _bodyStats(p),
                   ],
                 ),
                 const SizedBox(height: 14),

@@ -89,10 +89,14 @@ class PlayerMetaStore {
   /// 서버가 값을 못 준 카드는 `foot: null`로 저장해(키는 있음) 반복 요청을 막는다.
   /// 2026-09-28: 참여도(`workrate`)가 없으면 마지막 확인(`_wr_at`)이 하루 지났을 때만 미완성으로 본다
   /// (수집 전 캐시된 카드가 90일 동안 참여도 없이 남지 않게 + 수집 안 된 카드의 반복 요청 방지).
+  /// 2026-09-28: 키·몸무게(`height`) 키가 없는 기존 캐시도 미완성으로 봐 1회 재요청 (편집 시트 머리 표기용).
+  /// 서버가 값을 못 준 카드는 `height: null`로 저장해(키는 있음) 반복 요청을 막는다.
   static bool isComplete(Map<String, dynamic> m) =>
       (m['each_ovr']?.toString() ?? '').isNotEmpty &&
       m['traits'] is List &&
       m.containsKey('foot') &&
+      m.containsKey('height') &&
+      m.containsKey('nation') &&
       (m['workrate'] != null || _wrCheckedRecently(m));
 
   static bool _wrCheckedRecently(Map<String, dynamic> m) {
@@ -105,6 +109,21 @@ class PlayerMetaStore {
 
   /// 캐시된 공격/수비 참여도. 미조회·아직 수집 안 됨이면 null.
   static WorkRate? cachedWorkRate(num? spid) => WorkRate.fromJson(cached(spid)?['workrate']);
+
+  /// 캐시된 키(cm)·몸무게(kg) — 넥슨 데이터센터 원본 정수. 미조회·값 없음이면 null (2026-09-28).
+  static int? cachedHeight(num? spid) => (cached(spid)?['height'] as num?)?.toInt();
+  static int? cachedWeight(num? spid) => (cached(spid)?['weight'] as num?)?.toInt();
+
+  /// 캐시된 국적 `{name, flag}` / 소속팀 `{name, crest}` / 체형 글자 — 넥슨 선수 미리보기(player-bulk nation·team·body_type).
+  /// 미조회·값 없음(ICON 카드의 소속팀 등)이면 null (2026-09-28).
+  static Map<String, dynamic>? cachedNation(num? spid) => _asMap(cached(spid)?['nation']);
+  static Map<String, dynamic>? cachedTeam(num? spid) => _asMap(cached(spid)?['team']);
+  static String? cachedBodyType(num? spid) {
+    final v = cached(spid)?['body_type']?.toString();
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  static Map<String, dynamic>? _asMap(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : null;
 
   /// 여러 spid를 한 번에 확보 (DB → 서버 묶음). 완료 후 cached()로 접근.
   /// [freshPrice]면 30분 지난 시세를 서버에 다시 요청한다.
@@ -231,6 +250,10 @@ class PlayerMetaStore {
         // 참여도: 없으면 null + 확인 시각 기록 → 하루 뒤에만 다시 물어봄
         if (!m.containsKey('workrate')) m['workrate'] = null;
         m['_wr_at'] = now.millisecondsSinceEpoch;
+        // 키·몸무게·국적·소속팀·체형: 서버가 못 준 카드는 null로 기록해 '조회했음'을 남긴다 (isComplete 반복 요청 방지)
+        for (final k in const ['height', 'weight', 'nation', 'team', 'body_type']) {
+          if (!m.containsKey(k)) m[k] = null;
+        }
         _mem[spid] = m;
         _memAt[spid] = now;
         batch.insert('player_meta', {'spid': spid, 'json': json.encode(m), 'fetched_at': now.millisecondsSinceEpoch},
@@ -272,6 +295,12 @@ class PlayerMetaStore {
         // 참여도도 동봉 응답에 있을 때만 (없으면 _wr_at이 없어 player-bulk로 1회 확인)
         if (p['workrate'] != null) 'workrate': p['workrate'],
         if (p['workrate'] != null) '_wr_at': now.millisecondsSinceEpoch,
+        // 키·몸무게·국적·소속팀·체형도 동봉 응답에 있을 때만 (없으면 키를 비워 두어 player-bulk 재요청으로 채움)
+        if (p.containsKey('height')) 'height': p['height'],
+        if (p.containsKey('weight')) 'weight': p['weight'],
+        if (p.containsKey('nation')) 'nation': p['nation'],
+        if (p.containsKey('team')) 'team': p['team'],
+        if (p.containsKey('body_type')) 'body_type': p['body_type'],
       };
       _mem[spid] = m;
       _memAt[spid] = now;
