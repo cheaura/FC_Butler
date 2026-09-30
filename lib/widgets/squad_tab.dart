@@ -60,6 +60,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   // ── 스쿼드 본체 (웹 state 이식) ──
   String _formation = '4-3-3'; // 팀컬러 계산 payload용 포메이션 문자열
   String? _customLabel; // 커스텀 포메이션 라벨 (랭커/유저 스쿼드) — null이면 표준
+  String _customNotice = ''; // 유저 스쿼드 출처 안내 (서버 source_notice) — 커스텀 라벨이 있는 동안만 표시
   int _adap = 5;
   List<_Slot> _slots = [];
   Map<String, dynamic>? _tcCalc; // 팀컬러 계산 응답
@@ -842,6 +843,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         _snapDate = data['snap_date'] ?? '';
         _customLabel = '랭커 포메이션'
             '${_formationCond.isNotEmpty ? ' (${fmtFormation(_formationCond)})' : ''}';
+        _customNotice = '';
         if (_formationCond.isNotEmpty) _formation = _formationCond;
         _tcCalc = null;
       });
@@ -936,6 +938,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
         }).toList();
         _formation = d['formation5']?.toString() ?? '4-1-2-3';
         _customLabel = '$name의 스쿼드 (${fmtFormation(_formation)})';
+        _customNotice = d['source_notice']?.toString() ?? '';
         _tcCalc = null;
       });
       // B안: 서버가 동봉한 메타(pay·each_ovr·특성)를 바로 사용 — 11회 검색 제거
@@ -2013,6 +2016,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     store[name] = {
       'formation': _formation,
       'custom_label': _customLabel,
+      'custom_notice': _customNotice,
       'adap': _adap,
       'saved_at': DateTime.now().toIso8601String(),
       'slots': _slots
@@ -2094,6 +2098,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
     setState(() {
       _formation = data['formation']?.toString() ?? '4-3-3';
       _customLabel = data['custom_label']?.toString();
+      _customNotice = _customLabel == null ? '' : (data['custom_notice']?.toString() ?? '');
       _adap = (data['adap'] as num? ?? 5).toInt();
       _slots = rows.map((s) {
         final sp = (s['sp_pos'] as num? ?? kRoleSppos[s['role']?.toString() ?? 'st'] ?? 25).toInt();
@@ -2143,6 +2148,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
               Navigator.pop(context);
               setState(() {
                 _customLabel = null;
+                _customNotice = '';
                 if (!kFormations.containsKey(_formation)) {
                   _formation = '4-3-3';
                 }
@@ -2348,6 +2354,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
                   setState(() {
                     _formation = v;
                     _customLabel = null;
+                    _customNotice = '';
                     _buildSlots(v, keepPlayers: true);
                     _tcCalc = null;
                   });
@@ -2372,6 +2379,12 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
             ),
           ],
         ),
+        // 요청 모드가 아닌 경기 종류에서 불러온 유저 스쿼드면 출처 안내 (서버 source_notice)
+        if (_customLabel != null && _customNotice.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(_customNotice, style: TextStyle(fontSize: 11, color: _subColor)),
+          ),
       ],
     );
   }

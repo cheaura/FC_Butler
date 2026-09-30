@@ -82,17 +82,24 @@ class PanenkaPillBar extends StatelessWidget {
                                     ? accent
                                     : idle),
                             const SizedBox(height: 2),
-                            Text(items[i].label,
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                style: TextStyle(
-                                    fontSize: height >= 56 ? 9 : 8.5,
-                                    fontWeight: i == selectedIndex
-                                        ? FontWeight.w800
-                                        : FontWeight.w600,
-                                    color: i == selectedIndex
-                                        ? accent
-                                        : idle)),
+                            // 칸보다 긴 이름('선수(집훈)' 등, 8칸일 때)은 잘리지 않고 줄어든다 — 들어가는 이름은 그대로
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(items[i].label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.clip,
+                                    style: TextStyle(
+                                        fontSize: height >= 56 ? 9 : 8.5,
+                                        fontWeight: i == selectedIndex
+                                            ? FontWeight.w800
+                                            : FontWeight.w600,
+                                        color: i == selectedIndex
+                                            ? accent
+                                            : idle)),
+                              ),
+                            ),
                           ],
                         ),
                       ),

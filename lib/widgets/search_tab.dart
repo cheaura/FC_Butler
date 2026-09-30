@@ -1227,6 +1227,12 @@ class _SearchTabState extends State<SearchTab>
                     color: _accent)),
         ],
       ),
+      // 요청 모드가 아닌 경기 종류에서 가져온 스쿼드면 출처 안내 (서버 source_notice)
+      if ((s['source_notice'] ?? '').toString().isNotEmpty) ...[
+        const SizedBox(height: 2),
+        Text(s['source_notice'].toString(),
+            style: TextStyle(fontSize: 11, color: _subColor)),
+      ],
       const SizedBox(height: 8),
       // 총 급여·총 구단가치 — 스쿼드 그림 바로 위, 좌우 2칸 (스쿼드 탭과 동일 형식)
       Builder(builder: (_) {

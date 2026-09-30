@@ -1,10 +1,10 @@
-import 'training_calc_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/api_service.dart';
 import '../widgets/home_tab.dart';
 import '../widgets/market_tab.dart';
 import '../widgets/pill_nav_bar.dart';
+import '../widgets/player_tab.dart';
 import '../widgets/more_tab.dart';
 import '../widgets/ranking_tab.dart';
 import '../widgets/search_tab.dart';
@@ -12,7 +12,7 @@ import '../widgets/squad_tab.dart';
 import 'dashboard_screen.dart';
 
 /// 앱 탭 셸 (사용자 확정 구조):
-/// - 게스트·일반 회원: 홈 / 검색 / 랭킹 / 스쿼드 / 집훈 / 이적시장 / 더보기 (7탭)
+/// - 게스트·일반 회원: 홈 / 검색 / 랭킹 / 스쿼드 / 선수(집훈) / 이적시장 / 더보기 (7탭)
 /// - 매크로 연동 계정: + 모니터 탭 (8탭, 로그인 직후 모니터 탭에서 시작)
 /// 홈은 허브 — 타일을 누르면 해당 탭으로 이동. 모니터 탭(구 '매크로', 2026-09-03
 /// 스크린샷 유출 대비 명칭·아이콘 중립화 + 맨 우측 이동)은 기존 DashboardScreen을
@@ -101,7 +101,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       SearchTab(requestNotifier: _searchRequest),
       const RankingTab(),
       const SquadTab(),
-      const TrainingCalcScreen(asTab: true), // 1.0.4 집훈 계산기 (공개 탭)
+      const PlayerTab(), // 선수(집훈): 선수 검색·상세·비교·관심선수 + 집훈 계산기 (2026-09-30, 기존 집훈 탭 자리)
       const MarketTab(),
       MoreTab(onAccountChanged: _onAccountChanged),
       // 모니터(매크로) 탭 — 맨 우측 (2026-09-03: 스크린샷 유출 대비 명칭·아이콘 중립화)
@@ -116,7 +116,7 @@ class _PublicHomeScreenState extends State<PublicHomeScreen> {
       const PillBarItem(Icons.search, '검색'),
       const PillBarItem(Icons.leaderboard, '랭킹'),
       const PillBarItem(Icons.groups, '스쿼드'),
-      const PillBarItem(Icons.fitness_center, '집훈'),
+      const PillBarItem(Icons.person_search, '선수(집훈)'),
       const PillBarItem(Icons.storefront, '이적시장'),
       const PillBarItem(Icons.more_horiz, '더보기'),
       if (isMacro) const PillBarItem(Icons.query_stats, '모니터'),

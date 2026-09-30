@@ -58,6 +58,7 @@ class _MarketTabState extends State<MarketTab>
   bool _pnlLoading = false;
   List<Map<String, dynamic>> _pnl = [];
   String _pnlFormation = '';
+  String _pnlSourceNotice = ''; // 감독모드가 아닌 경기 종류에서 가져온 스쿼드 안내 (서버 source_notice)
   // 구매가 심층 탐색 (2026-08-19 확정: +100건 더 찾기 / 끝까지 찾기)
   bool _deepSearching = false;
   bool _deepCancel = false;
@@ -128,6 +129,7 @@ class _MarketTabState extends State<MarketTab>
     _exhausted['sell'] = false;
     _pnl = [];
     _pnlFormation = '';
+    _pnlSourceNotice = '';
     _error = null;
   }
 
@@ -422,6 +424,7 @@ class _MarketTabState extends State<MarketTab>
       _pnlLoading = true;
       _error = null;
       _pnl = [];
+      _pnlSourceNotice = '';
     });
     try {
       await _ensureMeta();
@@ -446,6 +449,7 @@ class _MarketTabState extends State<MarketTab>
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
       _pnlFormation = data['formation5'] ?? '';
+      _pnlSourceNotice = data['source_notice']?.toString() ?? '';
 
       // 시세: 서버 조회 (동시 4건 제한)
       final results = <Map<String, dynamic>>[];
@@ -977,7 +981,8 @@ class _MarketTabState extends State<MarketTab>
           Expanded(
             child: Text(
                 '${_nickname ?? ''}의 최근 경기 스쿼드 기준'
-                '${_pnlFormation.isNotEmpty ? ' · ${fmtFormation(_pnlFormation)}' : ''}',
+                '${_pnlFormation.isNotEmpty ? ' · ${fmtFormation(_pnlFormation)}' : ''}'
+                '${_pnlSourceNotice.isNotEmpty ? '\n$_pnlSourceNotice' : ''}',
                 style: TextStyle(fontSize: 12, color: _subColor)),
           ),
           TextButton(
