@@ -43,7 +43,7 @@ android {
 
     defaultConfig {
         applicationId = "com.panenka.app"
-        minSdk = 23
+        minSdk = 24  // Play 자동 보호 요구사항(최소 24) — 2026-10-08, 1.0.19 업로드 거부로 23→24
         targetSdk = 36
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName

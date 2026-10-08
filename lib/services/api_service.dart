@@ -464,6 +464,16 @@ class ApiService {
   Future<Map<String, dynamic>> cancelReserveStopTime(String username) =>
       sendControlCommand(username: username, action: 'cancel_reserve_stop_time');
 
+  // 원격 리셋 (2026-10-08): 매크로 화면의 ⟳와 동일 동작 — 전적(득실·승차 포함)/FC 채굴량/최고점수
+  Future<Map<String, dynamic>> resetRecord(String username) =>
+      sendControlCommand(username: username, action: 'reset_record');
+
+  Future<Map<String, dynamic>> resetFc(String username) =>
+      sendControlCommand(username: username, action: 'reset_fc');
+
+  Future<Map<String, dynamic>> resetHighest(String username) =>
+      sendControlCommand(username: username, action: 'reset_highest');
+
   // 자동재시작 on/off
   Future<Map<String, dynamic>> setAutoRestart(String username, bool enabled) =>
       sendControlCommand(username: username, action: 'set_auto_restart',

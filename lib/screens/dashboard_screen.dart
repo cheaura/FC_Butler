@@ -885,8 +885,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 _buildInfoItem(Icons.emoji_events, '티어', tier),
                 _buildInfoItem(Icons.star, '점수', _formatNumber(score)),
                 _buildInfoItem(Icons.leaderboard, '순위', _formatNumber(rank)),
-                _buildInfoItem(Icons.monetization_on, 'FC', '${_formatNumber(fcTotal)} FC'),
-                _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore), subtitle: highestScoreTime.isNotEmpty ? highestScoreTime : null),
+                _buildInfoItem(Icons.monetization_on, 'FC', '${_formatNumber(fcTotal)} FC',
+                    onReset: _canRemoteReset(account, 'reset_fc') ? () => _confirmReset(username, 'reset_fc') : null),
+                _buildInfoItem(Icons.workspace_premium, '최고점수', _formatNumber(highestScore), subtitle: highestScoreTime.isNotEmpty ? highestScoreTime : null,
+                    onReset: _canRemoteReset(account, 'reset_highest') ? () => _confirmReset(username, 'reset_highest') : null),
                 if (account['protection_status'] != null && account['protection_status'].toString().isNotEmpty)
                   _buildInfoItem(
                     account['protection_status'] == '보호날' ? Icons.shield : Icons.warning,
@@ -895,9 +897,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   ),
               ],
             ),
-            // 전적 5칸 표기 (승/무/패 | 전체·무제외 승률) — 전체 폭
+            // 전적 9칸 표기 (승/무/패 | 승률·무제외 | 득/실 | 승차 승·패) — 전체 폭, ⟳는 매크로와 같은 자리(우상단)
             const SizedBox(height: 8),
-            _buildRecordColumns(recordRaw),
+            _buildRecordColumns(recordRaw, account,
+                onReset: _canRemoteReset(account, 'reset_record') ? () => _confirmReset(username, 'reset_record') : null),
             // 최근 경기 승무패 도트 (20경기, 스와이프+기본버튼)
             Builder(builder: (context) {
               final rawResults = account['recent_results'] ?? [];
@@ -934,7 +937,50 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle}) {
+  /// 원격 리셋 가능 여부 — 매크로가 온라인이고 control_state.supports에 해당 액션이 있을 때만
+  /// (구버전 매크로는 supports에 reset_*이 없어 ⟳가 숨겨짐, 2026-10-08)
+  bool _canRemoteReset(Map<String, dynamic> account, String action) {
+    if (account['status'] != 'online') return false;
+    final cs = account['control_state'];
+    if (cs is! Map) return false;
+    final supports = cs['supports'];
+    return supports is List && supports.contains(action);
+  }
+
+  /// 리셋 확인 대화상자 → 원격 명령 전송 (매크로가 0으로 저장하고 상태를 올리면 카드가 따라 갱신됨)
+  Future<void> _confirmReset(String username, String action) async {
+    const titles = {
+      'reset_record': '전적을 초기화할까요?',
+      'reset_fc': 'FC 채굴량을 초기화할까요?',
+      'reset_highest': '최고점수를 초기화할까요?',
+    };
+    const bodies = {
+      'reset_record': '승·무·패와 득점·실점, 승부차기 승·패가 0이 됩니다.\n매크로 화면에도 같이 반영되며 되돌릴 수 없습니다.',
+      'reset_fc': '매크로 화면에도 같이 반영되며 되돌릴 수 없습니다.',
+      'reset_highest': '매크로 화면에도 같이 반영되며 되돌릴 수 없습니다.',
+    };
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(titles[action] ?? '초기화할까요?'),
+        content: Text('$username\n\n${bodies[action] ?? ''}'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('초기화')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final api = widget.apiService;
+    final request = action == 'reset_record'
+        ? api.resetRecord(username)
+        : action == 'reset_fc'
+            ? api.resetFc(username)
+            : api.resetHighest(username);
+    await _sendControl(username, request, '초기화 명령 전송됨');
+  }
+
+  Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle, VoidCallback? onReset}) {
     return Row(
       children: [
         Icon(icon, size: 16, color: PanenkaTokens.of(context).subInk),
@@ -962,13 +1008,34 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             ],
           ),
         ),
+        // 원격 리셋 ⟳ (매크로 화면과 같은 자리 — 항목 오른쪽 위, 2026-10-08)
+        if (onReset != null)
+          _resetIconButton(onReset),
       ],
     );
   }
 
-  /// 전적 5칸 표기 — 승/무/패(고유색) + 전체 승률/무제외 승률 (recordRaw: "W-D-L")
-  Widget _buildRecordColumns(String recordRaw) {
+  /// 작은 ⟳ 아이콘 버튼 (전적 상자·FC·최고점수 공용)
+  Widget _resetIconButton(VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(Icons.refresh, size: 15, color: Colors.grey[500]),
+      ),
+    );
+  }
+
+  /// 전적 9칸 표기 — 승/무/패(고유색) | 승률/무제외 | 득/실 | 승차 승·패 (recordRaw: "W-D-L")
+  /// 득실·승차는 account.goals_for/goals_against/pk_win/pk_lose (전적과 같은 묶음, 2026-10-08)
+  /// 승차 묶음은 "승차" 머리글을 위에 얹고 아래에 승·패 두 칸 (대시보드 W-T와 동일)
+  Widget _buildRecordColumns(String recordRaw, Map<String, dynamic> account, {VoidCallback? onReset}) {
     int wins = 0, draws = 0, losses = 0;
+    final int goalsFor = int.tryParse('${account['goals_for'] ?? 0}') ?? 0;
+    final int goalsAgainst = int.tryParse('${account['goals_against'] ?? 0}') ?? 0;
+    final int pkWin = int.tryParse('${account['pk_win'] ?? 0}') ?? 0;
+    final int pkLose = int.tryParse('${account['pk_lose'] ?? 0}') ?? 0;
     try {
       final parts = recordRaw.split('-');
       if (parts.length == 3) {
@@ -991,28 +1058,63 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final drawColor = _wdlDraw(context);
     final loseColor = _wdlLose(context);
 
-    Widget countCol(String label, int value, Color color) => Expanded(
+    // 득/실 색(파랑/주황)은 프리셋과 무관하게 고정 — 승/패 색과 겹치지 않게
+    final goalForColor = isDark ? const Color(0xFF7FB2F0) : const Color(0xFF2F6FB0);
+    final goalAgainstColor = isDark ? const Color(0xFFE8A46F) : const Color(0xFFB3612F);
+
+    // 9칸이라 글자 한 단계 축소 (A-A3): 라벨 9.5 · 숫자 13.5 · 승률 11.5
+    // 세 자리·네 자리 값은 FittedBox(scaleDown)로 칸 폭에 맞춰 자동 축소하고,
+    // 모든 칸을 아래 정렬(MainAxisAlignment.end)해 숫자 줄 바닥을 맞춘다 (매크로와 같은 원칙)
+    Widget fitNum(String text, TextStyle style) => FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(text, style: style, maxLines: 1, softWrap: false),
+    );
+
+    Widget countCol(String label, int value, Color color, {int flex = 1, double valueSize = 13.5}) => Expanded(
+      flex: flex,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
-          Text('$value', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
+          Text(label, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: color)),
+          fitNum('$value', TextStyle(fontSize: valueSize, fontWeight: FontWeight.bold, color: color)),
         ],
       ),
     );
 
     Widget rateCol(String label, String value) => Expanded(
+      flex: 4,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[isDark ? 500 : 600])),
-          Text(value, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.grey[850])),
+          Text(label, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: Colors.grey[isDark ? 500 : 600])),
+          fitNum(value, TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.grey[850])),
         ],
       ),
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+    Widget sep() => Container(width: 1, height: 28,
+        color: isDark ? Colors.white12 : const Color(0xFFDDE1E6));
+
+    // 승차 묶음: "승차" 머리글 + 승·패 두 칸 (세 줄이라 승·패 칸 숫자는 12.5)
+    Widget pkGroup() => Expanded(
+      flex: 6,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Text('승차', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey[isDark ? 500 : 600], height: 1.0)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              countCol('승', pkWin, winColor, flex: 1, valueSize: 12.5),
+              countCol('패', pkLose, loseColor, flex: 1, valueSize: 12.5),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final box = Container(
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
       decoration: BoxDecoration(
         color: isDark
             ? Colors.white.withOpacity(0.05)
@@ -1020,16 +1122,31 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
+        // 승차 묶음(3줄)이 다른 칸(2줄)보다 높으므로 아래 정렬로 숫자 줄 바닥을 맞춤
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          countCol('승', wins, winColor),
-          countCol('무', draws, drawColor),
-          countCol('패', losses, loseColor),
-          Container(width: 1, height: 28,
-              color: isDark ? Colors.white12 : const Color(0xFFDDE1E6)),
-          rateCol('전체 승률', '$rateAll%'),
-          rateCol('무제외 승률', '$rateWo%'),
+          countCol('승', wins, winColor, flex: 3),
+          countCol('무', draws, drawColor, flex: 3),
+          countCol('패', losses, loseColor, flex: 3),
+          sep(),
+          rateCol('승률', '$rateAll%'),
+          rateCol('무제외', '$rateWo%'),
+          sep(),
+          countCol('득', goalsFor, goalForColor, flex: 3),
+          countCol('실', goalsAgainst, goalAgainstColor, flex: 3),
+          sep(),
+          pkGroup(),
         ],
       ),
+    );
+
+    if (onReset == null) return box;
+    // ⟳는 매크로 화면과 같은 자리(상자 오른쪽 위)
+    return Stack(
+      children: [
+        box,
+        Positioned(top: 0, right: 0, child: _resetIconButton(onReset)),
+      ],
     );
   }
 
