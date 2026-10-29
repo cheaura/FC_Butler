@@ -98,6 +98,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   // 시즌 D-day
   int? _seasonDaysRemaining;
+  // 시즌 D-day 마지막 조회 시각 — 화면이 keep-alive로 살아 있어 initState 1회 조회만으로는
+  // 앱을 완전히 종료하기 전까지 갱신되지 않던 문제 대응 (2026-10-30). 웹과 같은 1시간 주기.
+  DateTime? _seasonInfoLoadedAt;
+  static const Duration _seasonInfoRefreshInterval = Duration(hours: 1);
 
   // 탭별 최초 로드 여부 (탭 전환 시 중복 로드 방지)
   bool _statisticsLoaded = false;
@@ -141,6 +145,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     _timer = Timer.periodic(const Duration(seconds: 60), (timer) {
       if (!_isInputting) {  // 입력 중이 아닐 때만 새로고침
         _loadStatus();
+        _loadSeasonInfoIfStale();  // 시즌 D-day는 1시간 주기로만 재조회
       }
     });
   }
@@ -159,9 +164,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     super.didChangeAppLifecycleState(state);
     
     if (state == AppLifecycleState.resumed) {
-      // 앱이 포그라운드로 돌아올 때 WebSocket 재연결
+      // 앱이 포그라운드로 돌아올 때 WebSocket 재연결 + 시즌 D-day 재조회
+      // (백그라운드에 있는 동안 날짜가 넘어가거나 관리자가 종료일을 바꾼 경우 반영)
       print('App resumed - reconnecting WebSocket');
       _connectWebSocket();
+      _loadSeasonInfo();
     } else if (state == AppLifecycleState.paused) {
       // 앱이 백그라운드로 갈 때
       print('App paused - WebSocket may disconnect');
@@ -172,14 +179,31 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Future<void> _loadSeasonInfo() async {
     try {
       final data = await _apiService.getSeasonInfo();
-      if (data['success'] == true && data['days_remaining'] != null) {
-        if (mounted) {
-          setState(() {
-            _seasonDaysRemaining = (data['days_remaining'] as num).toInt();
-          });
-        }
+      if (data['success'] != true) return;  // 통신 실패 시 이전 표시 유지
+      _seasonInfoLoadedAt = DateTime.now();
+      final days = data['days_remaining'];
+      if (mounted) {
+        setState(() {
+          // 종료일이 비워지면(null) 배지도 지운다 — 이전 값이 남지 않도록
+          _seasonDaysRemaining = days == null ? null : (days as num).toInt();
+        });
       }
     } catch (_) {}
+  }
+
+  /// 마지막 조회가 1시간 이상 지났을 때만 시즌 D-day 재조회 (60초 타이머에서 호출)
+  Future<void> _loadSeasonInfoIfStale() async {
+    final loadedAt = _seasonInfoLoadedAt;
+    if (loadedAt != null &&
+        DateTime.now().difference(loadedAt) < _seasonInfoRefreshInterval) {
+      return;
+    }
+    await _loadSeasonInfo();
+  }
+
+  /// 당겨서 새로고침 — 매크로 상태와 시즌 D-day를 함께 갱신
+  Future<void> _refreshStatusAndSeason() async {
+    await Future.wait([_loadStatus(), _loadSeasonInfo()]);
   }
 
   Future<void> _loadFCStatistics() async {
@@ -635,7 +659,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     }
 
     return RefreshIndicator(
-      onRefresh: _loadStatus,
+      onRefresh: _refreshStatusAndSeason,
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
         itemCount: _accounts.length,
