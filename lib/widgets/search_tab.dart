@@ -2,6 +2,7 @@ import 'dart:convert';
 import '../providers/theme_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/training_calc_screen.dart';
 import '../constants/positions.dart';
 import '../services/api_service.dart';
@@ -66,6 +67,11 @@ class _SearchTabState extends State<SearchTab>
   // 필터(클럽/키워드) 활성 여부 — 활성 시 전적 세그에 필터된 경기 목록 표시
   bool get _filterActive =>
       _club.isNotEmpty || _kwController.text.trim().isNotEmpty;
+  // 승패만 보기 (2026-10-20, 사용자 건의 #8): 전적 세그 전용 — 무승부를 빼고
+  // 승률=승/(승+패)로 재계산, 포메이션 승률·필터된 경기 목록에도 적용.
+  // 개요 세그(넥슨 랭킹 값)·경기 세그(항상 전체)는 건드리지 않음. 서버 변경 없음.
+  static const _wlOnlyPrefKey = 'search_wl_only';
+  bool _wlOnly = false;
   // 감독 스쿼드 조회 (최근 경기 라인업 — 서버 user-squad)
   bool _squadLoading = false;
   Map<String, dynamic>? _squad;
@@ -84,6 +90,13 @@ class _SearchTabState extends State<SearchTab>
     super.initState();
     RecentSearchStore.load().then((list) {
       if (mounted) setState(() => _recent = list);
+    });
+    // 승패만 보기 체크 상태 복원 (기기 저장)
+    SharedPreferences.getInstance().then((prefs) {
+      final v = prefs.getBool(_wlOnlyPrefKey) ?? false;
+      if (mounted && v != _wlOnly) setState(() => _wlOnly = v);
+    }).catchError((e) {
+      print('[SearchTab] 승패만 보기 설정 복원 실패: $e');
     });
     _loadClubs();
     widget.requestNotifier?.addListener(_onExternalRequest);
@@ -712,33 +725,75 @@ class _SearchTabState extends State<SearchTab>
     final summary = Map<String, dynamic>.from(m['summary'] ?? {});
     final myTactics = (m['my_tactics'] as List? ?? []);
     final oppTactics = (m['opp_tactics'] as List? ?? []);
-    final total = summary['total'] ?? 0;
-    final filteredList =
+    final winCnt = (summary['win'] as num? ?? 0).toInt();
+    final drawCnt = (summary['draw'] as num? ?? 0).toInt();
+    final loseCnt = (summary['lose'] as num? ?? 0).toInt();
+    // 승패만 보기: 무승부 제외 → 분모 승+패, 승률 재계산 (서버 값은 승/(승+무+패))
+    final total = _wlOnly ? (winCnt + loseCnt) : (summary['total'] ?? 0);
+    final rateText = _wlOnly
+        ? _wlRateText(winCnt, loseCnt)
+        : '${summary['win_rate'] ?? '-'}';
+    final rawFiltered =
         _filterActive ? (_filteredMatches?['matches'] as List? ?? []) : [];
+    final filteredList = _wlOnly
+        ? rawFiltered.where((x) => x['result']?.toString() != '무').toList()
+        : rawFiltered;
     return [
       _sectionCard(title: '전적 (수집 ${m['stored_total']}경기)', children: [
         Row(
           children: [
             // 승무패 색: 전체 UI 톤 통일 — 승=퍼플·무=퍼플그레이·패=로즈 (상태탭 A안 규칙)
-            _wdlBox('승', summary['win'] ?? 0, _winColor),
+            _wdlBox('승', winCnt, _winColor),
             const SizedBox(width: 6),
-            _wdlBox('무', summary['draw'] ?? 0, _drawColor),
-            const SizedBox(width: 6),
-            _wdlBox('패', summary['lose'] ?? 0, _loseColor),
+            // 승패만 보기 시 '무' 박스 숨김
+            if (!_wlOnly) ...[
+              _wdlBox('무', drawCnt, _drawColor),
+              const SizedBox(width: 6),
+            ],
+            _wdlBox('패', loseCnt, _loseColor),
             const Spacer(),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('${summary['win_rate'] ?? '-'}%',
+                Text('$rateText%',
                     style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
                         color: _accent)),
-                Text('$total경기 승률',
+                Text(_wlOnly ? '$total경기 승률 (무 제외)' : '$total경기 승률',
                     style: TextStyle(fontSize: 11, color: _subColor)),
               ],
             ),
           ],
+        ),
+        // 승패만 보기 체크박스 (사용자 건의 #8, 문구 사용자 확정)
+        InkWell(
+          onTap: () => _setWlOnly(!_wlOnly),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Checkbox(
+                    value: _wlOnly,
+                    onChanged: (v) => _setWlOnly(v ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text('승패만 보기',
+                    style: TextStyle(fontSize: 12, color: _subColor)),
+                if (_wlOnly && drawCnt > 0) ...[
+                  const SizedBox(width: 6),
+                  Text('(무 $drawCnt경기 제외)',
+                      style: TextStyle(fontSize: 11, color: _subColor)),
+                ],
+              ],
+            ),
+          ),
         ),
         if ((summary['forfeit_win'] ?? 0) > 0 ||
             (summary['forfeit_lose'] ?? 0) > 0)
@@ -1386,8 +1441,36 @@ class _SearchTabState extends State<SearchTab>
     );
   }
 
+  // 승패만 보기 토글 — 기기에 저장해 다음 검색에도 유지
+  void _setWlOnly(bool v) {
+    setState(() => _wlOnly = v);
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setBool(_wlOnlyPrefKey, v))
+        .catchError((e) {
+      print('[SearchTab] 승패만 보기 설정 저장 실패: $e');
+      return false;
+    });
+  }
+
+  // 무승부 제외 승률 (승/(승+패), 소수 1자리) — 승·패 모두 0이면 '-'
+  static String _wlRateText(int win, int lose) {
+    final denom = win + lose;
+    if (denom == 0) return '-';
+    return (win * 100 / denom).toStringAsFixed(1);
+  }
+
   Widget _tacticRow(dynamic t) {
-    final rate = (t['win_rate'] as num? ?? 0).toDouble();
+    final win = (t['win'] as num? ?? 0).toInt();
+    final draw = (t['draw'] as num? ?? 0).toInt();
+    final lose = (t['lose'] as num? ?? 0).toInt();
+    // 승패만 보기: 포메이션 승률도 무승부 제외로 재계산 (응답에 승·무·패 개수 별도 포함)
+    final rateText =
+        _wlOnly ? _wlRateText(win, lose) : '${t['win_rate'] ?? 0}';
+    final rate = _wlOnly
+        ? (win + lose == 0 ? 0.0 : win * 100 / (win + lose))
+        : (t['win_rate'] as num? ?? 0).toDouble();
+    final wdlText =
+        _wlOnly ? '$win승 $lose패' : '$win승 $draw무 $lose패';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
@@ -1399,8 +1482,7 @@ class _SearchTabState extends State<SearchTab>
                   style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w700)),
               const Spacer(),
-              Text(
-                  '${t['win']}승 ${t['draw']}무 ${t['lose']}패 · ${t['win_rate']}%',
+              Text('$wdlText · $rateText%',
                   style: TextStyle(fontSize: 12, color: _subColor)),
             ],
           ),

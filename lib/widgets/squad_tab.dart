@@ -75,7 +75,7 @@ class _SquadTabState extends State<SquadTab> with AutomaticKeepAliveClientMixin 
   final GlobalKey _pitchKey = GlobalKey(); // 필드 캡처용 RepaintBoundary
 
   static const _topOptions = [200, 1000, 3000, 5000, 10000];
-  static const _payLimit = 310; // 급여 상한 (초과 시에만 강조 — 패치로 오를 수 있음)
+  static const _payLimit = 315; // 급여 상한 (초과 시에만 강조 — 2026-10-29 패치로 310→315)
   static const _storageKey = 'squad_saved_v1';
 
   @override
