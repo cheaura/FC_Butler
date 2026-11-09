@@ -13,6 +13,7 @@ import '../screens/match_detail_screen.dart';
 import '../utils/fc_format.dart';
 import '../utils/tier_names.dart';
 import 'pill_tabs.dart';
+import 'daily_calendar.dart';
 import 'pitch_field.dart';
 import 'player_field_card.dart';
 
@@ -55,7 +56,17 @@ class _SearchTabState extends State<SearchTab>
   String _club = '';
   int _visibleMatches = 100; // 최초 100경기 표시, 더 보기 +100씩
   bool _autoBackfilled = false;
-  int _resultSeg = 0; // 0=개요, 1=스쿼드, 2=전적, 3=경기, 4=채굴
+  int _resultSeg = 0; // 0=개요, 1=스쿼드, 2=전적, 3=경기, 4=채굴, 5=일별
+  // 일별 세그 (2026-11-09, F안): 월별 캐시('YYYY-MM' → 서버 응답), 보고 있는 달, 선택한 날짜.
+  // 첫 조회는 그 달 경기를 서버가 추가 수집(backfill=1)하므로 채굴 세그처럼 타임아웃을 길게 둔다.
+  bool _dailyLoading = false;
+  final Map<String, Map<String, dynamic>> _dailyCache = {};
+  DateTime _dailyMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  String? _dailySelected;
+
+  String get _dailyKey =>
+      '${_dailyMonth.year}-${_dailyMonth.month.toString().padLeft(2, '0')}';
+  Map<String, dynamic>? get _daily => _dailyCache[_dailyKey];
   // 채굴량 조회 (승리당 FC — 챔피언스/슈퍼 챔피언스만 지급)
   // 기간별 캐시: 오늘/7일 토글 재호출 방지, 실패 시 이전 데이터 유지 (로딩 정책 2026-08-19)
   bool _miningLoading = false;
@@ -109,6 +120,8 @@ class _SearchTabState extends State<SearchTab>
           _matches = null;
           _filteredMatches = null;
           _miningCache.clear();
+          _dailyCache.clear();
+          _dailySelected = null;
           _squad = null;
           _error = null;
         });
@@ -163,6 +176,9 @@ class _SearchTabState extends State<SearchTab>
       _autoBackfilled = false;
       _resultSeg = 0;
       _miningCache.clear();
+      _dailyCache.clear();
+      _dailySelected = null;
+      _dailyMonth = DateTime(DateTime.now().year, DateTime.now().month);
       _squad = null;
     });
     try {
@@ -349,6 +365,50 @@ class _SearchTabState extends State<SearchTab>
     );
   }
 
+  /// 값 오른쪽에 알약 칩을 붙인 행 (개요 세그 승률 상위 % — chip이 null이면 _kvRow와 동일)
+  Widget _kvRowWithChip(String label, String value, String? chip) {
+    if (chip == null) return _kvRow(label, value);
+    final tokens = PanenkaTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Row(
+        children: [
+          SizedBox(
+              width: 96,
+              child: Text(label,
+                  style: TextStyle(fontSize: 13, color: _subColor))),
+          Expanded(
+            child: Row(
+              children: [
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: tokens.accentSoft,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: tokens.accentInk.withOpacity(0.5)),
+                    ),
+                    child: Text(chip,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: tokens.ink)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // 당겨서 새로고침 — 현재 세그먼트의 데이터만 재조회 (로딩 정책 2026-08-19)
   Future<void> _refreshCurrent() async {
     if (!_exists(_result)) {
@@ -368,6 +428,9 @@ class _SearchTabState extends State<SearchTab>
         break;
       case 4:
         await _loadMining(force: true);
+        break;
+      case 5:
+        await _loadDaily(force: true);
         break;
     }
   }
@@ -604,12 +667,13 @@ class _SearchTabState extends State<SearchTab>
       // 결과 탭 (A안: 개요 | 전적 | 경기 | 채굴 — 모드 탭과 동일한 알약 스타일·동일 폭)
       if (showMatches) ...[
         PillTabs(
-          labels: const ['개요', '스쿼드', '전적', '경기', '채굴'],
+          labels: const ['개요', '스쿼드', '전적', '경기', '채굴', '일별'],
           selectedIndex: _resultSeg,
           onSelected: (i) {
             setState(() => _resultSeg = i);
             if (i == 1 && _squad == null) _loadSquad();
             if (i == 4 && _mining == null) _loadMining();
+            if (i == 5 && _daily == null) _loadDaily();
           },
         ),
         const SizedBox(height: 12),
@@ -619,6 +683,7 @@ class _SearchTabState extends State<SearchTab>
       if (showMatches && _resultSeg == 2) ..._buildRecordSeg(),
       if (showMatches && _resultSeg == 3) ..._buildMatchListSeg(),
       if (showMatches && _resultSeg == 4) ..._buildMiningSeg(),
+      if (showMatches && _resultSeg == 5) ..._buildDailySeg(),
       if (dateInfo.toString().isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 4),
@@ -656,7 +721,10 @@ class _SearchTabState extends State<SearchTab>
             d['rank']?.toString().isNotEmpty == true ? '${d['rank']}위' : '-'),
         _kvRow('점수', d['score']?.toString() ?? '-'),
         _kvRow('구단가치', d['price']?.toString() ?? '-'),
-        _kvRow('승률', d['win_rate']?.toString() ?? '-'),
+        // 승률 옆 '상위 n%' 칩 (E-1, 2026-11-09): 현재 시즌 이 모드 랭킹 10,000명 중 승률 순위 백분율.
+        // 분포 없음(2vs2·수집 전)이면 칩 생략 — 랭킹 밖 감독은 이 카드 자체가 없음
+        _kvRowWithChip('승률', d['win_rate']?.toString() ?? '-',
+            d['win_rate_top_pct'] != null ? '상위 ${d['win_rate_top_pct']}%' : null),
         _kvRow('전적 (승|무|패)', d['wdl']?.toString() ?? '-'),
         _kvRow('팀컬러', d['team_color']?.toString() ?? '-'),
         _kvRow('포메이션', d['formation']?.toString() ?? '-'),
@@ -970,6 +1038,126 @@ class _SearchTabState extends State<SearchTab>
     } finally {
       if (mounted) setState(() => _miningLoading = false);
     }
+  }
+
+  // ── 일별 세그 (2026-11-09, F안): 월 달력 + 선택일 상세 + 이달 합계·표식 날짜 ──
+  Future<void> _loadDaily({bool force = false}) async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty || _dailyLoading) return;
+    final key = _dailyKey;
+    // 월별 캐시 — 달 이동 왕복 시 재호출 없음, 당겨서 새로고침만 재조회
+    if (!force && _dailyCache[key] != null) return;
+    setState(() => _dailyLoading = true);
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/api/user/lookup/daily'
+            '?name=${Uri.encodeComponent(name)}&mode=$_mode&month=$key&backfill=1'),
+      ).timeout(const Duration(seconds: 240)); // 첫 조회는 그 달 경기 수집이라 오래 걸릴 수 있음
+      final data = json.decode(response.body);
+      if (mounted && data['success'] == true) {
+        setState(() {
+          _dailyCache[key] = Map<String, dynamic>.from(data);
+          // 선택일이 이 달에 없으면 오늘(있을 때)로
+          final today = dailyTodayKey();
+          final days = (data['days'] as List? ?? []).map((e) => e['date']?.toString()).toSet();
+          if (_dailySelected == null || !days.contains(_dailySelected)) {
+            _dailySelected = days.contains(today) ? today : null;
+          }
+        });
+      }
+    } catch (e) {
+      print('[SearchTab] 일별 기록 로드 실패: $e');
+      if (mounted && _dailyCache[key] == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('일별 기록 조회에 실패했습니다. 아래로 당겨 다시 시도하세요.')));
+      }
+    } finally {
+      if (mounted) setState(() => _dailyLoading = false);
+    }
+  }
+
+  void _shiftDailyMonth(int delta) {
+    final now = DateTime.now();
+    final next = DateTime(_dailyMonth.year, _dailyMonth.month + delta);
+    // 미래 달은 없음
+    if (next.year > now.year || (next.year == now.year && next.month > now.month)) return;
+    setState(() {
+      _dailyMonth = next;
+      _dailySelected = null;
+    });
+    _loadDaily();
+  }
+
+  List<Widget> _buildDailySeg() {
+    final now = DateTime.now();
+    final isCurrentMonth =
+        _dailyMonth.year == now.year && _dailyMonth.month == now.month;
+    final widgets = <Widget>[
+      // 월 이동 헤더
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: '이전 달',
+            onPressed: _dailyLoading ? null : () => _shiftDailyMonth(-1),
+          ),
+          Text('${_dailyMonth.year}년 ${_dailyMonth.month}월',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '다음 달',
+            onPressed: (_dailyLoading || isCurrentMonth) ? null : () => _shiftDailyMonth(1),
+          ),
+        ],
+      ),
+    ];
+    final raw = _daily;
+    if (_dailyLoading && raw == null) {
+      widgets.add(const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      ));
+      widgets.add(Text('이 달 경기를 수집해 집계하고 있습니다. 경기가 많으면 시간이 걸립니다.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: _subColor)));
+      return widgets;
+    }
+    if (raw == null || raw['found'] != true) {
+      widgets.add(_sectionCard(title: '일별 기록', children: [
+        Text('일별 기록 데이터를 찾지 못했습니다.',
+            style: TextStyle(color: _subColor, fontSize: 13)),
+      ]));
+      return widgets;
+    }
+    final data = DailyMonthData.fromJson(raw);
+    final sel = _dailySelected != null ? data.days[_dailySelected!] : null;
+    widgets.addAll([
+      DailyCalendar(
+        data: data,
+        selected: _dailySelected,
+        onPick: (key) => setState(() => _dailySelected = key),
+      ),
+      const SizedBox(height: 6),
+      const DailyLegend(),
+      if (sel != null)
+        DailyDetailCard(
+          day: sel,
+          isToday: sel.date == dailyTodayKey(),
+          isBestFc: sel.date == data.bestFcDate,
+          isBestWr: sel.date == data.bestWinrateDate,
+        )
+      else
+        const SizedBox(height: 10),
+      DailySummaryTiles(data: data),
+      const SizedBox(height: 10),
+      Text(
+        '※ 서버에 수집된 경기만 집계됩니다. 넥슨이 더 이상 제공하지 않는 기간은 빈 칸으로 둡니다.'
+        '${raw['covered'] == false ? ' 이 달은 경기가 많아 일부만 수집했습니다 — 당겨서 새로고침하면 이어서 수집됩니다.' : ''}',
+        style: TextStyle(fontSize: 11, color: _subColor),
+      ),
+    ]);
+    return widgets;
   }
 
   List<Widget> _buildMiningSeg() {

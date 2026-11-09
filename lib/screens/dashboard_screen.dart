@@ -742,30 +742,42 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     ],
                   ],
                 ),
-                // 온라인 뱃지: 민트 점 + 중립 알약, 오프라인은 회색 점 파생 (A안)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? Colors.white.withOpacity(0.06)
-                        : Colors.black.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                // 오른쪽 묶음: 시즌 승률 상위 % 칩 (G-2, 2026-11-09) + 온라인 뱃지
+                // 칩 = 현재 시즌 감독모드 랭킹 10,000명 중 승률 순위. 매크로 누적 전적(⟳ 리셋 기준)과 무관.
+                // 랭킹 밖·분포 없음은 흐린 칩 (사용자 결정). 머리 줄이 좁으면 칩이 먼저 줄어든다(Flexible)
+                Flexible(
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.circle,
-                          size: 10,
-                          color: isOnline ? _mintDot : Colors.grey),
-                      const SizedBox(width: 4),
-                      Text(
-                        isOnline ? '온라인' : '오프라인',
-                        style: TextStyle(
-                            color: Theme.of(context).brightness ==
-                                    Brightness.dark
-                                ? Colors.white70
-                                : Colors.grey.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600),
+                      Flexible(child: _buildWinratePctChip(account['win_rate_top_pct'])),
+                      const SizedBox(width: 6),
+                      // 온라인 뱃지: 민트 점 + 중립 알약, 오프라인은 회색 점 파생 (A안)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white.withOpacity(0.06)
+                              : Colors.black.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.circle,
+                                size: 10,
+                                color: isOnline ? _mintDot : Colors.grey),
+                            const SizedBox(width: 4),
+                            Text(
+                              isOnline ? '온라인' : '오프라인',
+                              style: TextStyle(
+                                  color: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Colors.white70
+                                      : Colors.grey.shade700,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1004,6 +1016,36 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     await _sendControl(username, request, '초기화 명령 전송됨');
   }
 
+  /// 시즌 승률 상위 % 칩 (카드 머리, 상태 배지 왼쪽). pct가 null이면 흐린 '상위 % 없음'
+  Widget _buildWinratePctChip(dynamic pct) {
+    final tokens = PanenkaTokens.of(context);
+    final has = pct != null && pct.toString().isNotEmpty;
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: has ? tokens.accentSoft : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: has ? tokens.accentInk.withOpacity(0.5) : tokens.lineStrong.withOpacity(0.5)),
+      ),
+      child: Text(
+        has ? '승률 상위 $pct%' : '상위 % 없음',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: has ? tokens.ink : tokens.mute),
+      ),
+    );
+    return Tooltip(
+      message: has
+          ? '현재 시즌 감독모드 랭킹 10,000명 중 승률 순위 (매일 새벽 갱신)'
+          : '현재 시즌 감독모드 랭킹 10,000위 안에 없거나 랭커 승률 분포가 아직 없습니다',
+      child: has ? chip : Opacity(opacity: 0.55, child: chip),
+    );
+  }
+
   Widget _buildInfoItem(IconData icon, String label, String value, {String? subtitle, VoidCallback? onReset}) {
     return Row(
       children: [
@@ -1087,20 +1129,32 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final goalAgainstColor = isDark ? const Color(0xFFE8A46F) : const Color(0xFFB3612F);
 
     // 9칸이라 글자 한 단계 축소 (A-A3): 라벨 9.5 · 숫자 13.5 · 승률 11.5
-    // 세 자리·네 자리 값은 FittedBox(scaleDown)로 칸 폭에 맞춰 자동 축소하고,
-    // 모든 칸을 아래 정렬(MainAxisAlignment.end)해 숫자 줄 바닥을 맞춘다 (매크로와 같은 원칙)
-    Widget fitNum(String text, TextStyle style) => FittedBox(
-      fit: BoxFit.scaleDown,
-      child: Text(text, style: style, maxLines: 1, softWrap: false),
+    // 2026-11-09 정렬 수정: 종전엔 칸마다 FittedBox(scaleDown)가 4자리 숫자만 가로·세로 함께 줄여
+    // 그 칸 숫자 줄이 낮아지고(바닥 정렬이라 라벨까지 내려감) 옆 칸과 위아래가 어긋났음(실측 3.4px).
+    //  → ① 숫자 글자 크기는 줄 전체에 같은 값(어느 칸이든 4자리 이상이면 한 단계 축소)
+    //    ② 숫자는 고정 높이 상자(valueBoxH) 안에 두어 축소 여부와 무관하게 라벨 줄 높이를 맞춤
+    final int maxDigits = [wins, draws, losses, goalsFor, goalsAgainst]
+        .map((v) => '$v'.length)
+        .fold(0, (a, b) => a > b ? a : b);
+    final double countSize = maxDigits >= 4 ? 11.5 : 13.5;
+    final double pkSize = maxDigits >= 4 ? 11.0 : 12.5;
+    const double valueBoxH = 17.0;
+
+    Widget fitNum(String text, TextStyle style) => SizedBox(
+      height: valueBoxH,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(text, style: style, maxLines: 1, softWrap: false),
+      ),
     );
 
-    Widget countCol(String label, int value, Color color, {int flex = 1, double valueSize = 13.5}) => Expanded(
+    Widget countCol(String label, int value, Color color, {int flex = 1, double? valueSize}) => Expanded(
       flex: flex,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Text(label, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: color)),
-          fitNum('$value', TextStyle(fontSize: valueSize, fontWeight: FontWeight.bold, color: color)),
+          fitNum('$value', TextStyle(fontSize: valueSize ?? countSize, fontWeight: FontWeight.bold, color: color)),
         ],
       ),
     );
@@ -1129,8 +1183,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              countCol('승', pkWin, winColor, flex: 1, valueSize: 12.5),
-              countCol('패', pkLose, loseColor, flex: 1, valueSize: 12.5),
+              countCol('승', pkWin, winColor, flex: 1, valueSize: pkSize),
+              countCol('패', pkLose, loseColor, flex: 1, valueSize: pkSize),
             ],
           ),
         ],
